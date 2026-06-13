@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body {
+      margin: 0; padding: 0; overflow: hidden;
+      background: transparent;
+      -webkit-user-select: none; user-select: none;
+      cursor: default;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    canvas { display: block; }
+
+    /* ---------------- modern menu panel (DOM, floats above the canvas) */
+    #ui { position: absolute; inset: 0; pointer-events: none; }
+    .panel {
+      position: absolute;
+      left: 50%;
+      width: 252px;
+      transform: translateX(-50%) scale(0.65);
+      transform-origin: 50% 100%;
+      opacity: 0;
+      pointer-events: auto;
+      background: rgba(24, 24, 28, 0.94);
+      border: 0.5px solid rgba(255, 255, 255, 0.14);
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(255,255,255,0.06) inset;
+      padding: 6px;
+      transition: transform 0.18s cubic-bezier(0.34, 1.45, 0.64, 1), opacity 0.13s ease-out;
+    }
+    .panel.open { transform: translateX(-50%) scale(1); opacity: 1; }
+    .panel::after { /* little pointer toward the cat */
+      content: '';
+      position: absolute;
+      left: 50%; bottom: -5px;
+      width: 10px; height: 10px;
+      transform: translateX(-50%) rotate(45deg);
+      background: rgba(24, 24, 28, 0.94);
+      border-right: 0.5px solid rgba(255,255,255,0.14);
+      border-bottom: 0.5px solid rgba(255,255,255,0.14);
+      border-bottom-right-radius: 3px;
+    }
+    .panel-title {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 8px 6px;
+      font-size: 10.5px; font-weight: 600; letter-spacing: 0.7px;
+      color: rgba(255, 255, 255, 0.45);
+    }
+    .panel-title .esc { font-weight: 500; letter-spacing: 0.2px; color: rgba(255,255,255,0.25); }
+    .row {
+      display: flex; align-items: center; gap: 9px;
+      padding: 5px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: #f2f1f6;
+    }
+    .row:hover { background: rgba(255, 255, 255, 0.09); }
+    .row:active { background: rgba(255, 255, 255, 0.13); }
+    .row .ic { width: 18px; height: 18px; flex: 0 0 auto; image-rendering: pixelated; }
+    .row .tx { flex: 1; min-width: 0; }
+    .row .lb {
+      font-size: 12.5px; font-weight: 500; line-height: 1.25;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .row .hint {
+      font-size: 10.5px; color: rgba(255, 255, 255, 0.42); line-height: 1.3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .row .due {
+      flex: 0 0 auto; font-size: 10px; font-weight: 600;
+      padding: 2px 7px; border-radius: 20px;
+      background: rgba(255, 255, 255, 0.1); color: rgba(255,255,255,0.6);
+    }
+    .row .due.overdue { background: rgba(255, 159, 67, 0.18); color: #ffb763; }
+    .row .due.snooze { cursor: pointer; }
+    .row .due.snooze:hover { background: rgba(255, 159, 67, 0.3); }
+    .row.task .lb.done { text-decoration: line-through; color: rgba(255,255,255,0.35); }
+    .row.wrap .lb { white-space: normal; font-size: 11.5px; line-height: 1.35; }
+    .row.msgrow .lb { font-size: 11.5px; }
+    .check {
+      width: 15px; height: 15px; flex: 0 0 auto;
+      border: 1.5px solid rgba(255, 255, 255, 0.35);
+      border-radius: 50%;
+    }
+    .check.on { background: #ffd400; border-color: #ffd400; position: relative; }
+    .check.on::after {
+      content: ''; position: absolute; left: 4px; top: 1.5px;
+      width: 4px; height: 7px;
+      border: solid #1a1a1e; border-width: 0 1.5px 1.5px 0;
+      transform: rotate(40deg);
+    }
+    .sep { height: 1px; margin: 4px 8px; background: rgba(255,255,255,0.08); }
+    .addbar {
+      display: flex; gap: 6px; align-items: center;
+      margin-top: 4px; padding: 4px;
+    }
+    .addbar input {
+      flex: 1; min-width: 0;
+      background: rgba(255, 255, 255, 0.08);
+      border: 0.5px solid rgba(255, 255, 255, 0.12);
+      border-radius: 7px;
+      color: #f2f1f6;
+      font: 12px system-ui;
+      padding: 6px 9px;
+      outline: none;
+    }
+    .addbar input::placeholder { color: rgba(255,255,255,0.3); }
+    .addbar input:focus { border-color: rgba(255, 212, 0, 0.55); }
+    .addbar button {
+      background: #ffd400; color: #1a1a1e;
+      border: none; border-radius: 7px;
+      font: 600 11.5px system-ui;
+      padding: 6px 11px; cursor: pointer;
+    }
+    .addbar button:active { transform: scale(0.96); }
+    .empty { padding: 10px 8px; font-size: 11.5px; color: rgba(255,255,255,0.35); }
+  </style>
+</head>
+<body>
+  <canvas id="cat"></canvas>
+  <div id="ui"></div>
+  <script src="sprites.js"></script>
+  <script src="font.js"></script>
+  <script src="icons.js"></script>
+  <script src="gifts.js"></script>
+  <script src="audio.js"></script>
+  <script src="cat.js"></script>
+</body>
+</html>

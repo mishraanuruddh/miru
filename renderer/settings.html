@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="logo">PIXEL<span>PAW</span></div>
+      <div class="tagline">A PIXEL CAT IN YOUR COMPUTER</div>
+      <nav id="nav">
+        <button data-tab="cat" class="active">CAT</button>
+        <button data-tab="reactions">REACTIONS</button>
+        <button data-tab="breaks">BREAKS</button>
+        <button data-tab="reminders">REMINDERS</button>
+        <button data-tab="agents">AI AGENTS</button>
+        <button data-tab="launcher">LAUNCHER</button>
+        <button data-tab="inbox">INBOX</button>
+        <button data-tab="about">ABOUT</button>
+      </nav>
+      <div class="side-foot" id="versionLine">v1.0.0</div>
+    </aside>
+
+    <main class="main">
+      <!-- ================================================== CAT -->
+      <section id="tab-cat" class="tab active">
+        <h1>YOUR CAT</h1>
+        <div class="row">
+          <div class="panel preview-panel">
+            <canvas id="preview" width="260" height="220"></canvas>
+          </div>
+          <div class="panel grow">
+            <label class="field">
+              <span>CAT'S NAME <em>shown in its menu + it introduces itself</em></span>
+              <input id="catName" type="text" maxlength="16" placeholder="e.g. MOCHI" />
+            </label>
+            <label class="field">
+              <span>YOUR NAME <em>the cat calls you by name</em></span>
+              <input id="name" type="text" maxlength="20" placeholder="e.g. ANU" />
+            </label>
+            <div class="field">
+              <span>CAT SIZE</span>
+              <div class="seg" id="sizeSeg">
+                <button data-v="3">S</button>
+                <button data-v="4" class="active">M</button>
+                <button data-v="5">L</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>LOOK</span>
+              <div class="seg" id="lookSeg">
+                <button data-v="kawaii" class="active">CUTE</button>
+                <button data-v="classic">CLASSIC</button>
+              </div>
+            </div>
+            <div class="field">
+              <span>FUR STYLE</span>
+              <div class="seg" id="styleSeg">
+                <button data-v="plain" class="active">PLAIN</button>
+                <button data-v="tabby">TABBY</button>
+                <button data-v="spots">SPOTS</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h2>MATCH MY CAT</h2>
+        <div class="panel">
+          <div class="statusline" style="margin-top:0">
+            <span class="hint" style="flex:1">Upload a photo of your cat — the colors map onto the pixel cat automatically.</span>
+            <label class="btn yellow" style="cursor:pointer">UPLOAD PHOTO<input id="photoFile" type="file" accept="image/*" style="display:none" /></label>
+          </div>
+          <div id="swatches" class="presets" style="margin-top:10px"></div>
+          <p class="hint" id="swatchHint" style="display:none">Wrong color picked? Click a swatch to use it as the body color instead.</p>
+        </div>
+
+        <h2>PATTERN</h2>
+        <div class="panel">
+          <div id="presets" class="presets"></div>
+          <div id="customColors" class="custom-colors"></div>
+          <p class="hint">Pick a preset, then tweak any part to make it your own cat. Tweaking switches to CUSTOM.</p>
+        </div>
+
+        <h2>PIXEL EDITOR</h2>
+        <div class="panel">
+          <p class="hint" style="margin-top:0">Paint the exact markings that make your cat <em>yours</em> — blaze, patches, smudges.
+            Click or drag on the cat. Markings show on every front-facing pose.</p>
+          <div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap">
+            <canvas id="pixedit" width="312" height="273" style="image-rendering:pixelated; border:2px solid #000; background:#22212a; cursor:crosshair"></canvas>
+            <div style="flex:1; min-width:200px">
+              <div class="field"><span>BRUSH</span><div id="brushSwatches" class="presets"></div></div>
+              <label class="field" style="max-width:140px"><span>ANY COLOR</span><input id="brushColor" type="color" value="#867e74" style="width:46px;height:30px;border:2px solid #000;background:none" /></label>
+              <div class="btns" style="margin-top:8px">
+                <button id="eraserBtn" class="btn">ERASER OFF</button>
+                <button id="clearPixels" class="btn">CLEAR ALL</button>
+              </div>
+              <p class="hint">Right-click also erases. Eyes stay alive — they're drawn over your pixels.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================ REACTIONS -->
+      <section id="tab-reactions" class="tab">
+        <h1>REACTIONS</h1>
+        <div class="panel" id="reactionToggles">
+          <label class="toggle"><input type="checkbox" data-k="eyeFollow" /><i></i> EYE FOLLOW <em>eyes track your mouse</em></label>
+          <label class="toggle"><input type="checkbox" data-k="hunt" /><i></i> MOUSE HUNT <em>chases fast cursors</em></label>
+          <label class="toggle"><input type="checkbox" data-k="knead" /><i></i> KEYBOARD KNEADING <em>kneads while you type</em></label>
+          <label class="toggle"><input type="checkbox" data-k="overheat" /><i></i> OVERHEAT MODE <em>types too fast? steam!</em></label>
+          <label class="toggle"><input type="checkbox" data-k="pet" /><i></i> PURRING PETS <em>rub its head to purr</em></label>
+          <label class="toggle"><input type="checkbox" data-k="scrollPaper" /><i></i> PAPER UNROLL <em>plays with paper when you scroll</em></label>
+          <label class="toggle"><input type="checkbox" data-k="sleep" /><i></i> NAPS <em>sleeps when you are away</em></label>
+        </div>
+
+        <h2>SOUNDS</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="soundsEnabled" /><i></i> MEOWS &amp; PURRS</label>
+          <label class="field slider-field">
+            <span>VOLUME</span>
+            <input id="volume" type="range" min="0" max="100" />
+          </label>
+        </div>
+
+        <h2>PERMISSIONS</h2>
+        <div class="panel">
+          <p class="hint" style="margin-top:0">
+            Keyboard kneading, overheat and paper unroll need macOS <b>Accessibility</b> permission to see
+            global typing &amp; scrolling. Mouse reactions work without it.
+          </p>
+          <div class="statusline">
+            <span id="permStatus" class="status bad">CHECKING…</span>
+            <button id="grantBtn" class="btn">GRANT PERMISSION…</button>
+          </div>
+          <p class="hint">If it still doesn't react after granting, also enable <b>Input Monitoring</b> for Electron/PixelPaw in System Settings → Privacy &amp; Security, then restart the app.</p>
+        </div>
+      </section>
+
+      <!-- =============================================== BREAKS -->
+      <section id="tab-breaks" class="tab">
+        <h1>BREAKS</h1>
+        <h2>STRETCH REMINDER</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="stretchEnabled" /><i></i> GROW BIG &amp; STRETCH WITH ME</label>
+          <label class="field slider-field">
+            <span>EVERY <b id="stretchMinLabel">50</b> MIN</span>
+            <input id="stretchMin" type="range" min="10" max="120" step="5" />
+          </label>
+        </div>
+
+        <h2>POMODORO</h2>
+        <div class="panel">
+          <div class="pom-grid">
+            <label class="field"><span>FOCUS MIN</span><input id="pomFocus" type="number" min="5" max="120" /></label>
+            <label class="field"><span>BREAK MIN</span><input id="pomBreak" type="number" min="1" max="60" /></label>
+            <label class="field"><span>LONG BREAK</span><input id="pomLong" type="number" min="5" max="60" /></label>
+            <label class="field"><span>LONG EVERY</span><input id="pomEvery" type="number" min="0" max="8" /></label>
+          </div>
+          <label class="toggle"><input type="checkbox" id="pomLoop" /><i></i> LOOP AUTOMATICALLY</label>
+          <div class="statusline">
+            <span id="pomStatus" class="status">OFF</span>
+            <span class="btns">
+              <button id="pomStart" class="btn yellow">START</button>
+              <button id="pomPause" class="btn">PAUSE</button>
+              <button id="pomSkip" class="btn">SKIP</button>
+              <button id="pomStop" class="btn">STOP</button>
+            </span>
+          </div>
+          <p class="hint">A pixel timer floats next to the cat. Click it to pause/resume.</p>
+        </div>
+      </section>
+
+      <!-- ============================================ REMINDERS -->
+      <section id="tab-reminders" class="tab">
+        <h1>REMINDERS</h1>
+        <h2>PINNED MESSAGE</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="fixedEnabled" /><i></i> PIN A NOTE ABOVE THE CAT</label>
+          <input id="fixedText" type="text" maxlength="80" placeholder="e.g. SHIP THE DEMO BY FRIDAY" />
+        </div>
+
+        <h2>MEOW AT A TIME</h2>
+        <div class="panel">
+          <div id="reminderList" class="reminder-list"></div>
+          <div class="reminder-add">
+            <input id="remTime" type="time" value="14:00" />
+            <input id="remText" type="text" maxlength="80" placeholder="DRINK WATER" />
+            <button id="remAdd" class="btn yellow">+ ADD</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- =============================================== AGENTS -->
+      <section id="tab-agents" class="tab">
+        <h1>AI AGENTS</h1>
+        <p class="hint big">The cat thinks along while your AI agent works, and does a happy jump (with a meow!) when it finishes.</p>
+        <h2>CLAUDE CODE</h2>
+        <div class="panel">
+          <div class="statusline">
+            <span id="hooksStatus" class="status">CHECKING…</span>
+            <span class="btns">
+              <button id="hooksInstall" class="btn yellow">INSTALL HOOKS</button>
+              <button id="hooksUninstall" class="btn">REMOVE</button>
+            </span>
+          </div>
+          <p class="hint">Writes 6 hooks into <code>~/.claude/settings.json</code> (a backup is saved next to it):
+            working → status light + thinking face · finished → happy jump · needs you → alert ·
+            asks a question → the options appear on the cat. Hooks also capture which terminal tab asked,
+            so the cat can jump you (and your answer) back to it.</p>
+        </div>
+
+        <h2>CODEX CLI</h2>
+        <div class="panel">
+          <div class="statusline">
+            <span id="codexStatus" class="status">CHECKING…</span>
+            <span class="btns">
+              <button id="codexInstall" class="btn yellow">INSTALL NOTIFY</button>
+              <button id="codexUninstall" class="btn">REMOVE</button>
+            </span>
+          </div>
+          <p class="hint">Adds a <code>notify</code> hook to <code>~/.codex/config.toml</code> (backup saved).
+            Codex fires it when a turn completes → happy jump + "CODEX DONE!".
+            Codex doesn't expose working/question events to external hooks, so it's done-only.
+            Note: the desktop Codex app and any background CLI sessions share this config —
+            every completed turn lands in INBOX with the assistant's last words, so you can
+            always tell which Codex spoke.</p>
+          <label class="toggle"><input type="checkbox" id="codexCelebrate" /><i></i> JUMP + MEOW ON CODEX TURNS <em>off = silent inbox logging only</em></label>
+        </div>
+
+        <h2>BACKGROUND AUTOMATION</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="muteBackground" /><i></i> MUTE AGENTS WITHOUT A TERMINAL
+            <em>pipelines, cron jobs, headless execs → inbox + LED only, no meows</em></label>
+          <p class="hint">Sessions running in a terminal you can see (iTerm, Terminal) always celebrate.
+            Everything else — batch <code>codex exec</code> runs, scheduled jobs, app-servers — stays quiet
+            and leaves a trail in INBOX instead.</p>
+        </div>
+
+        <h2>QUESTIONS</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="autoType" /><i></i> TYPE MY ANSWER INTO THE TERMINAL
+            <em>click an option on the cat → focuses the exact Terminal/iTerm2 tab and types the number</em></label>
+          <p class="hint">First use will trigger one-time macOS prompts to allow controlling Terminal/iTerm2 and
+            System Events. Embedded terminals (VS Code, Cursor) can't be tab-targeted — the cat then shows
+            "WINDOW NOT FOUND" and you answer manually. Permission prompts (not questions) are always focus-only.</p>
+          <button id="askTestBtn" class="btn">SHOW A TEST QUESTION ON THE CAT</button>
+        </div>
+
+        <h2>ANY OTHER AGENT</h2>
+        <div class="panel">
+          <p class="hint" style="margin-top:0">PixelPaw listens on <code id="portLabel">127.0.0.1:41999</code>. Wire any tool (Codex CLI, Cursor, scripts…) with:</p>
+          <pre id="apiExample"></pre>
+          <p class="hint">States: <code>thinking</code> · <code>done</code> · <code>alert</code> · <code>idle</code>. Or make the cat speak: <code>POST /say {"text":"HELLO"}</code></p>
+        </div>
+      </section>
+
+      <!-- ============================================== LAUNCHER -->
+      <section id="tab-launcher" class="tab">
+        <h1>LAUNCHER</h1>
+        <p class="hint big">Hold the cat (or right-click it) and a menu springs out: voice dictation,
+          your apps, tasks, and recent messages. Click anywhere else and it melts back into the cat.</p>
+
+        <h2>SUMMON</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="hotkeyEnabled" /><i></i> GLOBAL HOTKEY <em>⌃⌥C opens the cat menu from anywhere</em></label>
+          <p class="hint">Also: hold the cat ~⅓s, or right-click it.</p>
+        </div>
+
+        <h2>VOICE (MURMUR)</h2>
+        <div class="panel">
+          <label class="field">
+            <span>MURMUR APP PATH</span>
+            <input id="murmurPath" type="text" />
+          </label>
+          <p class="hint">VOICE toggles dictation by sending Murmur's ⌃⌥T shortcut (launches it first if needed).
+            Speak and the words are typed wherever your cursor is.</p>
+        </div>
+
+        <h2>APPS</h2>
+        <div class="panel">
+          <div id="appList" class="reminder-list"></div>
+          <div class="reminder-add">
+            <input id="appLabel" type="text" maxlength="14" placeholder="LABEL (e.g. CODE)" style="max-width:160px" />
+            <input id="appName" type="text" maxlength="60" placeholder="macOS app name (e.g. Visual Studio Code)" />
+            <button id="appAdd" class="btn yellow">+ ADD</button>
+          </div>
+          <p class="hint">Opened with <code>open -a "App Name"</code>.</p>
+        </div>
+
+        <h2>TASKS</h2>
+        <div class="panel">
+          <p class="hint" style="margin-top:0">The cat keeps a tiny task list (TASKS page in its menu).
+            Add from anywhere: <code id="todoExample">curl -X POST http://127.0.0.1:41999/todo -d '{"text":"ship it"}'</code>
+            — or dictate with Murmur into any app and paste. Click a task on the cat to check it off.</p>
+        </div>
+      </section>
+
+      <!-- ================================================ INBOX -->
+      <section id="tab-inbox" class="tab">
+        <h1>INBOX</h1>
+        <div class="panel">
+          <div class="statusline" style="margin-top:0">
+            <span class="hint" style="flex:1">Everything the cat told you: reminders, agent turns, /say messages. Survives restarts.</span>
+            <button id="inboxClearBtn" class="btn">CLEAR ALL</button>
+          </div>
+          <div id="inboxList" class="reminder-list" style="margin-top:10px"></div>
+        </div>
+      </section>
+
+      <!-- ================================================ ABOUT -->
+      <section id="tab-about" class="tab">
+        <h1>ABOUT</h1>
+        <div class="panel">
+          <p class="hint big" style="margin-top:0">PIXELPAW — a pixel cat that lives on your desktop.<br/>Inspired by <a href="#" id="comnyangLink">Comnyang</a>. Built with Electron, zero image assets — every pixel is drawn by code.</p>
+          <ul class="hint tips">
+            <li>DRAG the cat anywhere — it stretches like mochi.</li>
+            <li>SHAKE it while dragging and it wobbles.</li>
+            <li>PET its head with the mouse — it purrs.</li>
+            <li>CLICK it for a boop. DOUBLE-CLICK opens settings.</li>
+            <li>RIGHT-CLICK the cat or use the menu bar icon for quick actions.</li>
+            <li>Move your mouse really fast… it might pounce.</li>
+          </ul>
+          <label class="toggle"><input type="checkbox" id="openAtLogin" /><i></i> START AT LOGIN</label>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="sprites.js"></script>
+  <script src="font.js"></script>
+  <script src="palette.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

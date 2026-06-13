@@ -1,0 +1,1428 @@
+'use strict';
+/* global Sprites, PixelFont, PixelIcons, CatGifts, CatAudio, pixelpaw */
+(async function () {
+  const { framesFor, SKINS, drawCat } = Sprites;
+  let FRAMES = framesFor('kawaii');
+  const { drawIcon } = PixelIcons;
+  const { GIFTS, drawGift } = CatGifts;
+
+  const canvas = document.getElementById('cat');
+  const ctx = canvas.getContext('2d');
+  let W = window.innerWidth, H = window.innerHeight;
+  const DPR = window.devicePixelRatio || 1;
+
+  function sizeCanvas() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  }
+  sizeCanvas();
+  window.addEventListener('resize', sizeCanvas);
+
+  // ------------------------------------------------------------- settings
+  let settings = await pixelpaw.getSettings();
+  let skin = resolveSkin();
+  FRAMES = framesFor(settings.spriteStyle);
+
+  function resolveSkin() {
+    if (settings.skin === 'custom' && settings.customColors) {
+      return { ...SKINS.black, ...settings.customColors };
+    }
+    return SKINS[settings.skin] || SKINS.black;
+  }
+
+  function applySound() {
+    CatAudio.setEnabled(!!settings.sounds.enabled);
+    CatAudio.setVolume(settings.sounds.volume ?? 0.5);
+  }
+  applySound();
+
+  pixelpaw.onSettings((s) => {
+    settings = s;
+    skin = resolveSkin();
+    FRAMES = framesFor(settings.spriteStyle);
+    applySound();
+    if (st.menu.open && panelEl) renderMenuDom(); // live task/app updates
+  });
+
+  // ---------------------------------------------------------------- state
+  const now = () => performance.now();
+  const st = {
+    mode: 'idle',
+    modeT: 0,
+    cursor: { x: -999, y: -999 },   // window-relative, from main tick
+    vel: 0,
+    idleSec: 0,
+    kps: 0,
+    lastKeyT: -1e9,
+    lastScrollT: -1e9,
+    scrollLen: 0,
+    heat: 0,
+    pet: { meter: 0, lastStrokeT: -1e9, lastX: 0, active: false },
+    agents: { working: 0, alert: 0, details: [] },
+    ledBox: null,
+    ledHover: false,
+    menu: { open: false, page: 'root', hover: -1, anim: 0, closing: false, rows: [], boxes: [], panelBox: null, lastTouchT: 0 },
+    inbox: [],
+    bond: { xp: 0, level: 1, gifts: [], counters: {}, records: {}, daysTogether: 0, streak: 0, bestStreak: 0 },
+    shownGift: null, // {id, until} — presented at the cat's feet
+    zoomiesUntil: -1e9,
+    nextZoomiesT: now() + 60000,
+    longPressTimer: null,
+    question: null, // {qid, agent, header, question, options, canType, status, hover, boxes, openBox, dismissBox, panelBox}
+    doneFlashUntil: -1e9,
+    celebrateUntil: -1e9,
+    celebrateText: null,
+    alertUntil: -1e9,
+    stretchUntil: -1e9,
+    hopUntil: -1e9,
+    wakeUntil: -1e9,    // surprise "!" on wake
+    sleepingSince: 0,
+    hunt: { phase: 'none', dir: 1 },
+    drag: { active: false, vx: 0, vy: 0, sy: 1, springV: 0, shear: 0, wobble: 0, releasedT: -1e9 },
+    bubble: null,       // {text, until, kind}
+    pom: null,
+    blinkUntil: -1e9,
+    nextBlinkT: now() + 3000,
+    wander: { active: false, gaze: { gx: 1, gy: 1 }, nextAt: 0, stillSince: 0 },
+    tailIdx: 0,
+    tailT: 0,
+    effects: [],
+    boopT: -1e9,
+    catBBox: { x: 0, y: 0, w: 0, h: 0 },
+    chipBBox: null,
+    interactive: false,
+    mouseDown: null,
+    draggingEngaged: false,
+  };
+
+  // ----------------------------------------------------------- ipc wiring
+  pixelpaw.onTick((t) => {
+    st.cursor = t.cursor;
+    st.vel = t.vel;
+    st.idleSec = t.idleSec;
+    if (t.huntPhase) st.hunt.phase = t.huntPhase;
+    updateInteractive(t.cursor.x, t.cursor.y);
+  });
+
+  pixelpaw.onKey(({ kps }) => {
+    st.kps = kps;
+    st.lastKeyT = now();
+  });
+
+  pixelpaw.onScroll(({ amount }) => {
+    st.lastScrollT = now();
+    st.scrollLen = Math.min(70, st.scrollLen + amount * 2);
+  });
+
+  pixelpaw.onHunt(({ phase, dir }) => {
+    st.hunt.phase = phase;
+    if (dir) st.hunt.dir = dir;
+    if (phase === 'caught') {
+      spawnHearts(3);
+      CatAudio.meowShort();
+    }
+  });
+
+  pixelpaw.onDrag((d) => {
+    if (d.phase === 'start') {
+      st.drag.active = true;
+      st.drag.releasedT = -1e9;
+    } else if (d.phase === 'move') {
+      st.drag.vx = d.vx; st.drag.vy = d.vy;
+    } else if (d.phase === 'end') {
+      st.drag.active = false;
+      st.drag.releasedT = now();
+      st.drag.springV = (st.drag.sy - 1) * -8;
+    }
+  });
+
+  pixelpaw.onAgents((a) => { st.agents = a || { working: 0, alert: 0, details: [] }; });
+
+  pixelpaw.onAgentDone(({ agent, quiet, silent }) => {
+    st.doneFlashUntil = now() + 2500;
+    if (silent) return; // burst-limited: LED flash + inbox only
+    if (quiet) {
+      st.hopUntil = now() + 900;
+      CatAudio.meowShort();
+    } else {
+      celebrate(`${agent} DONE!`, 3000);
+    }
+  });
+
+  pixelpaw.onAgentAlert(({ agent, message }) => {
+    st.alertUntil = now() + 8000;
+    showBubble(String(message || `${agent} NEEDS YOU!`).toUpperCase(), 8000);
+    CatAudio.alert();
+  });
+
+  pixelpaw.onAsk((q) => {
+    st.question = { ...q, status: 'idle', hover: -1, boxes: [], openBox: null, dismissBox: null, panelBox: null };
+    st.bubble = null;
+    st.alertUntil = -1e9;
+    st.hopUntil = now() + 700;
+    CatAudio.alert();
+  });
+
+  pixelpaw.onAskClear(() => { st.question = null; });
+
+  pixelpaw.onInbox((items) => {
+    st.inbox = items || [];
+    if (st.menu.open && panelEl && st.menu.page === 'inbox') renderMenuDom();
+  });
+
+  pixelpaw.onBond((b) => { st.bond = b; });
+  pixelpaw.getBond().then((b) => { st.bond = b; });
+
+  pixelpaw.onRitual(({ kind, name, dueToday, daysTogether, milestone }) => {
+    const nm = name ? ', ' + name.toUpperCase() : '';
+    if (milestone) {
+      celebrate(`${milestone} DAYS TOGETHER${nm}!`, 4000);
+    } else if (kind === 'reunion') {
+      celebrate(`MISSED YOU${nm}!`, 3000);
+      spawnHearts(4);
+    } else {
+      st.stretchUntil = now() + 3500; // morning stretch
+      const due = dueToday > 0 ? ` ${dueToday} DUE TODAY.` : '';
+      showBubble(`MORNING${nm}!${due}`, 7000);
+      CatAudio.meowShort();
+    }
+  });
+
+  pixelpaw.onGift(({ id, name, rarity }) => {
+    st.shownGift = { id, until: now() + 120000 };
+    showBubble(`I CAUGHT THIS FOR YOU! ${name.toUpperCase()}${rarity === 'rare' ? ' (RARE!)' : ''}`, 9000);
+    CatAudio.tada();
+    spawnSparkles(rarity === 'rare' ? 14 : 6);
+    st.hopUntil = now() + 1200;
+  });
+  pixelpaw.getInbox().then((items) => { st.inbox = items || []; });
+  pixelpaw.onMenuToggle(() => toggleMenu());
+
+  pixelpaw.onAskResult((r) => {
+    if (!st.question || st.question.qid !== r.qid) return;
+    if (r.typed) st.question.status = 'typed:' + (r.app || '');
+    else if (r.located) st.question.status = 'focused:' + (r.app || '');
+    else st.question.status = 'notfound';
+  });
+
+  pixelpaw.onPom((p) => { st.pom = p; });
+  pixelpaw.onPomPhase(({ phase }) => {
+    const nm = nameSuffix();
+    if (phase === 'break' || phase === 'long') {
+      celebrate(`BREAK TIME${nm}!`, 3200);
+    } else if (phase === 'focus') {
+      showBubble('FOCUS TIME!', 4000);
+      CatAudio.meowShort();
+    }
+  });
+
+  pixelpaw.onRemind(({ text }) => {
+    showBubble(String(text || '').toUpperCase(), 9000);
+    CatAudio.meow();
+    st.hopUntil = now() + 900;
+  });
+
+  pixelpaw.onStretchNow((p) => {
+    const ms = (p && p.ms) || 11000;
+    st.stretchUntil = now() + ms;
+    showBubble(`STRETCH TIME${nameSuffix()}!`, Math.min(8000, ms));
+    CatAudio.meow();
+  });
+
+  function nameSuffix() {
+    const n = (settings.name || '').trim();
+    return n ? ', ' + n.toUpperCase() : '';
+  }
+
+  function celebrate(text, ms) {
+    st.celebrateUntil = now() + ms;
+    if (text) showBubble(text, ms + 1500);
+    CatAudio.tada();
+    setTimeout(() => CatAudio.meow(), 320);
+    spawnSparkles(8);
+  }
+
+  function showBubble(text, ms, kind = 'say') {
+    st.bubble = { text, until: now() + ms, kind };
+  }
+
+  // ------------------------------------------------------------- effects
+  function spawn(type, x, y, vx, vy, life, data = {}) {
+    st.effects.push({ type, x, y, vx, vy, life, maxLife: life, ...data });
+  }
+  function spawnHearts(n) {
+    const { x, y, w } = st.catBBox;
+    for (let i = 0; i < n; i++) {
+      spawn('heart', x + w * (0.2 + Math.random() * 0.6), y - 4, (Math.random() - 0.5) * 18, -22 - Math.random() * 14, 1.4);
+    }
+  }
+  function spawnSparkles(n) {
+    const { x, y, w, h } = st.catBBox;
+    for (let i = 0; i < n; i++) {
+      spawn('sparkle', x + w * Math.random(), y + h * Math.random() * 0.7, (Math.random() - 0.5) * 50, -30 - Math.random() * 40, 0.9);
+    }
+  }
+
+  // --------------------------------------------------------- interactivity
+  function inBox(x, y, b) {
+    return !!b && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  }
+
+  function pointInteractive(x, y) {
+    const b = st.catBBox;
+    if (x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4) return true;
+    if (inBox(x, y, st.chipBBox)) return true;
+    if (inBox(x, y, st.ledBox)) return true;
+    if (st.bubble && inBox(x, y, st.bubbleBox)) return true;
+    if (st.question && inBox(x, y, st.question.panelBox)) return true;
+    if (st.menu.open && panelEl) {
+      const r = panelEl.getBoundingClientRect();
+      if (x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 10) return true;
+    }
+    return false;
+  }
+
+  function updateInteractive(x, y) {
+    const want = st.drag.active || st.draggingEngaged || pointInteractive(x, y);
+    if (want !== st.interactive) {
+      st.interactive = want;
+      pixelpaw.setInteractive(want);
+    }
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    updateInteractive(e.clientX, e.clientY);
+
+    // question panel hover
+    if (st.question) {
+      st.question.hover = st.question.boxes.findIndex((b) => inBox(e.clientX, e.clientY, b));
+    }
+    st.ledHover = inBox(e.clientX, e.clientY, st.ledBox);
+    if (st.menu.open && e.target && e.target.closest && e.target.closest('.panel')) {
+      st.menu.lastTouchT = now();
+    }
+
+    // drag engage after small movement (any movement cancels the long-press menu)
+    if (st.mouseDown && !st.draggingEngaged) {
+      const d = Math.hypot(e.clientX - st.mouseDown.x, e.clientY - st.mouseDown.y);
+      if (d > 4) clearTimeout(st.longPressTimer);
+      if (d > 7) {
+        st.draggingEngaged = true;
+        pixelpaw.dragStart(st.mouseDown.x, st.mouseDown.y);
+      }
+    }
+
+    // petting: horizontal strokes over the head area
+    if (settings.reactions.pet && !st.drag.active && headHit(e.clientX, e.clientY)) {
+      const dx = e.clientX - st.pet.lastX;
+      if (Math.abs(dx) > 1.5) {
+        st.pet.meter = Math.min(100, st.pet.meter + Math.abs(dx));
+        st.pet.lastStrokeT = now();
+      }
+    }
+    st.pet.lastX = e.clientX;
+  });
+
+  function headHit(x, y) {
+    const b = st.catBBox;
+    return x >= b.x && x <= b.x + b.w && y >= b.y - 6 && y <= b.y + b.h * 0.55;
+  }
+
+  window.addEventListener('mousedown', (e) => {
+    st.lastInput = { type: 'down', x: e.clientX, y: e.clientY, button: e.button, t: Math.round(now()) };
+    if (e.button === 2) return;
+    const X = e.clientX, Y = e.clientY;
+
+    // paw menu first: rows handle their own clicks; click-away dismisses
+    if (st.menu.open) {
+      if (e.target && e.target.closest && e.target.closest('.panel')) {
+        st.menu.lastTouchT = now();
+      } else {
+        closeMenu();
+      }
+      return;
+    }
+
+    // question panel clicks take priority
+    const q = st.question;
+    if (q && inBox(X, Y, q.panelBox)) {
+      const opt = q.boxes.findIndex((b) => inBox(X, Y, b));
+      if (opt >= 0 && q.canType && !q.status.startsWith('typed')) {
+        q.status = 'sending';
+        pixelpaw.askAnswer(q.qid, opt);
+        CatAudio.pop();
+      } else if (inBox(X, Y, q.openBox)) {
+        pixelpaw.askOpen(q.qid);
+        CatAudio.pop();
+      } else if (inBox(X, Y, q.dismissBox)) {
+        pixelpaw.askDismiss(q.qid);
+        st.question = null;
+        CatAudio.pop();
+      }
+      return;
+    }
+
+    if (inBox(X, Y, st.ledBox)) {
+      pixelpaw.ledClick();
+      CatAudio.pop();
+      return;
+    }
+    if (st.bubble && inBox(X, Y, st.bubbleBox)) {
+      // a message is a doorway to the inbox, not a dead end
+      st.bubble = null;
+      openMenu('inbox');
+      return;
+    }
+    if (inBox(X, Y, st.chipBBox)) {
+      pixelpaw.pomControl('toggle-pause');
+      CatAudio.pop();
+      return;
+    }
+    if (pointInteractive(X, Y)) {
+      st.mouseDown = { x: X, y: Y };
+      // hold still on the cat to open the paw menu
+      clearTimeout(st.longPressTimer);
+      st.longPressTimer = setTimeout(() => {
+        if (st.mouseDown && !st.draggingEngaged && !st.drag.active) {
+          st.mouseDown = null;
+          openMenu();
+        }
+      }, 320);
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    clearTimeout(st.longPressTimer);
+    if (st.draggingEngaged) {
+      pixelpaw.dragEnd();
+      st.draggingEngaged = false;
+    } else if (st.mouseDown) {
+      // boop!
+      st.boopT = now();
+      CatAudio.pop();
+      spawnHearts(1);
+      pixelpaw.bondEvent('boop');
+    }
+    st.mouseDown = null;
+  });
+
+  window.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (st.menu.open || pointInteractive(e.clientX, e.clientY)) toggleMenu();
+  });
+
+  window.addEventListener('dblclick', (e) => {
+    if (pointInteractive(e.clientX, e.clientY)) pixelpaw.openSettings();
+  });
+
+  document.addEventListener('mouseleave', () => updateInteractive(-99, -99));
+
+  // ------------------------------------------------------------ mode logic
+  function resolveMode() {
+    const t = now();
+    if (st.drag.active) return 'drag';
+    if (st.hunt.phase === 'chase') return 'hunt';
+    if (st.hunt.phase === 'leap') return 'leap';
+    if (st.hunt.phase === 'caught') return 'caught';
+    if (st.menu.open) return 'menu'; // summoning the menu wins over festivities
+    if (t < st.celebrateUntil) return 'celebrate';
+    if (t < st.stretchUntil) return 'stretch';
+    if (t < st.alertUntil) return 'alert';
+    if (st.pet.active) return 'pet';
+    const typing = t - st.lastKeyT < 1000 && settings.reactions.knead;
+    if (st.heat > 0.7 && settings.reactions.overheat) return 'overheat';
+    if (typing) return 'knead';
+    if (t - st.lastScrollT < 1300 && settings.reactions.scrollPaper) return 'scroll';
+    if (st.question) return 'question';
+    if (st.agents.working > 0) return 'think';
+    if (t < st.zoomiesUntil) return 'zoomies';
+    if (settings.reactions.sleep && st.idleSec > 240) return 'sleep';
+    return 'idle';
+  }
+
+  function update(dt) {
+    const t = now();
+
+    // overheat accumulation
+    if (settings.reactions.overheat && t - st.lastKeyT < 800 && st.kps > 5.5) {
+      st.heat = Math.min(1, st.heat + dt * 0.22 * (st.kps / 8));
+    } else {
+      st.heat = Math.max(0, st.heat - dt * 0.16);
+    }
+
+    // petting state
+    st.pet.meter = Math.max(0, st.pet.meter - dt * 55);
+    const wasPetting = st.pet.active;
+    st.pet.active = settings.reactions.pet && st.pet.meter > 45 && t - st.pet.lastStrokeT < 700;
+    if (st.pet.active && !wasPetting) { CatAudio.startPurr(); pixelpaw.bondEvent('pet'); }
+    if (!st.pet.active && wasPetting) CatAudio.stopPurr();
+    // deeper bond = more hearts when petting
+    if (st.pet.active && Math.random() < dt * (1.6 + (st.bond.level || 1) * 0.6)) spawnHearts(1);
+
+    // L5 zoomies: old friends get the occasional burst of joy
+    if ((st.bond.level || 1) >= 5 && st.mode === 'idle' && t > st.nextZoomiesT) {
+      st.zoomiesUntil = t + 1800;
+      st.nextZoomiesT = t + 1800000 + Math.random() * 1800000; // every 30-60 min
+      spawnSparkles(4);
+    }
+
+    // scroll paper retracts
+    if (t - st.lastScrollT > 400) st.scrollLen = Math.max(0, st.scrollLen - dt * 60);
+
+    // mode transitions
+    const m = resolveMode();
+    if (m !== st.mode) {
+      const prev = st.mode;
+      st.mode = m;
+      st.modeT = 0;
+      if (prev === 'sleep' && m !== 'sleep') {
+        st.wakeUntil = t + 700;
+      }
+      if (m === 'sleep') st.sleepingSince = t;
+    } else {
+      st.modeT += dt;
+    }
+
+    // drag mochi physics
+    const d = st.drag;
+    if (d.active) {
+      const speed = Math.hypot(d.vx, d.vy);
+      const target = 1 + Math.min(0.65, speed / 2600);
+      d.sy += (target - d.sy) * Math.min(1, dt * 14);
+      const shearTarget = Math.max(-0.45, Math.min(0.45, -d.vx / 1800));
+      d.shear += (shearTarget - d.shear) * Math.min(1, dt * 10);
+      d.vx *= 0.86; d.vy *= 0.86;
+    } else if (t - d.releasedT < 900) {
+      // damped spring back to 1
+      const k = 90, c = 9;
+      const a = -k * (d.sy - 1) - c * d.springV;
+      d.springV += a * dt;
+      d.sy += d.springV * dt;
+      d.shear *= Math.max(0, 1 - dt * 8);
+    } else {
+      d.sy = 1; d.springV = 0; d.shear = 0;
+    }
+
+    // blink scheduling
+    if (t > st.nextBlinkT) {
+      st.blinkUntil = t + 130;
+      st.nextBlinkT = t + 2600 + Math.random() * 3500;
+    }
+
+    // paw menu animation + auto-fade when ignored
+    const mn = st.menu;
+    if (mn.open) {
+      if (mn.closing) {
+        mn.anim -= dt * 9;
+        if (mn.anim <= 0) { mn.open = false; mn.closing = false; mn.anim = 0; mn.panelBox = null; }
+      } else {
+        mn.anim = Math.min(1, mn.anim + dt * 7);
+        const typing = document.activeElement && document.activeElement.id === 'todoInput';
+        if (!typing && now() - mn.lastTouchT > 10000) closeMenu();
+      }
+    }
+    syncMenuDom();
+
+    // gaze wander when the mouse has been still for a while
+    const w = st.wander;
+    if (st.vel > 30) {
+      w.stillSince = t;
+      w.active = false;
+    } else if (t - w.stillSince > 6000) {
+      w.active = true;
+      if (t > w.nextAt) {
+        w.nextAt = t + 1600 + Math.random() * 2400;
+        const opts = [[0, 1], [2, 1], [1, 0], [1, 1], [1, 1], [0, 0], [2, 0], [1, 2]];
+        const pick = opts[Math.floor(Math.random() * opts.length)];
+        w.gaze = { gx: pick[0], gy: pick[1] };
+      }
+    }
+
+    // tail sway
+    st.tailT += dt * (st.mode === 'knead' || st.mode === 'overheat' ? 2.2 : st.mode === 'think' ? 1.6 : 1);
+    if (st.tailT > 0.55) {
+      st.tailT = 0;
+      st.tailIdx = (st.tailIdx + 1) % 4;
+    }
+
+    // ambient effects
+    if (st.mode === 'sleep' && Math.random() < dt * 0.7) {
+      const b = st.catBBox;
+      spawn('z', b.x + b.w * 0.75, b.y + 6, 8, -14, 2.2);
+    }
+    if (st.heat > 0.65 && Math.random() < dt * (st.heat * 5)) {
+      const b = st.catBBox;
+      spawn('steam', b.x + b.w * (0.25 + Math.random() * 0.5), b.y - 2, (Math.random() - 0.5) * 10, -26, 1.1);
+    }
+
+    // particles
+    for (const p of st.effects) {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.type === 'steam') p.vy *= 0.99;
+      if (p.type === 'heart') p.vx *= 0.98;
+    }
+    st.effects = st.effects.filter((p) => p.life > 0);
+  }
+
+  // ---------------------------------------------------------------- render
+  function pickFrame() {
+    const t = now();
+    switch (st.mode) {
+      case 'drag': return { f: FRAMES.hang };
+      case 'hunt': return { f: Math.floor(t / 90) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: st.hunt.dir < 0 };
+      case 'leap': return { f: FRAMES.leap, flip: st.hunt.dir < 0 };
+      case 'caught': return { f: FRAMES.knead_l };
+      case 'celebrate': return { f: FRAMES.celebrate };
+      case 'stretch': return { f: FRAMES.stretch_up };
+      case 'sleep': return { f: FRAMES.loaf };
+      case 'overheat':
+      case 'knead': return { f: Math.floor(t / 320) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
+      case 'zoomies': return { f: Math.floor(t / 80) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: Math.floor(t / 700) % 2 === 0 };
+      case 'scroll': return { f: Math.floor(t / 380) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
+      default: {
+        const tails = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
+        return { f: tails[st.tailIdx] };
+      }
+    }
+  }
+
+  function eyeStyle() {
+    const t = now();
+    if (st.mode === 'sleep') return 'closed';
+    if (t < st.blinkUntil) return 'closed';
+    if (st.mode === 'pet' || st.mode === 'caught') return 'happy';
+    if (st.mode === 'celebrate') return st.modeT > 0.5 ? 'happy' : 'open';
+    if (st.mode === 'overheat' && st.heat > 0.85) return 'squint';
+    return 'open';
+  }
+
+  function computeGaze() {
+    // pupil slot 0..2 on each axis inside the 4x4 socket
+    if (st.mode === 'think') return { gx: 0, gy: 0 };
+    if (st.mode === 'question' || st.mode === 'menu') return { gx: 1, gy: 0 }; // looking up at the panel
+    if (st.mode === 'celebrate') return { gx: 1, gy: 1 };
+    if (!settings.reactions.eyeFollow) return { gx: 1, gy: 1 };
+    if (st.wander.active) return st.wander.gaze;
+    const b = st.catBBox; // window-space, from previous frame
+    const ex = b.x + b.w / 2, ey = b.y + b.h * 0.32;
+    const dx = st.cursor.x - ex, dy = st.cursor.y - ey;
+    if (Math.hypot(dx, dy) < 14) return { gx: 1, gy: 1 };
+    const ang = Math.atan2(dy, dx);
+    const h = Math.cos(ang), v = Math.sin(ang);
+    const gx = h < -0.38 ? 0 : h > 0.38 ? 2 : 1;
+    const gy = v < -0.45 ? 0 : v > 0.45 ? 2 : 1;
+    return { gx, gy };
+  }
+
+  function lum(hex) {
+    const h = String(hex).replace('#', '');
+    return 0.299 * parseInt(h.slice(0, 2), 16) + 0.587 * parseInt(h.slice(2, 4), 16) + 0.114 * parseInt(h.slice(4, 6), 16);
+  }
+  // marks drawn on the face (closed eyes, mouth) need contrast against the fur
+  function faceInk() {
+    return Math.abs(lum(skin.pupil) - lum(skin.headL)) > 50 ? skin.pupil : skin.iris;
+  }
+
+  function mouthStyle() {
+    if (st.mode === 'celebrate' || (st.mode === 'overheat' && st.heat > 0.8)) return 'open';
+    if (st.mode === 'pet' || st.mode === 'caught' || now() - st.boopT < 900) return 'w';
+    return 'w'; // resting cat face: the little \u03c9
+  }
+
+  function render() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.imageSmoothingEnabled = false;
+
+    const px = settings.scale || 4;
+    const { f: frame, flip } = pickFrame();
+    const t = now();
+
+    // scale animation for stretch mode
+    let anim = 1;
+    if (st.mode === 'stretch') {
+      const k = Math.min(1, st.modeT / 0.8);
+      const remain = (st.stretchUntil - t) / 1000;
+      const out = remain < 0.8 ? Math.max(0, remain / 0.8) : 1;
+      anim = 1 + 0.55 * Math.min(k, out) + Math.sin(t / 300) * 0.02;
+    }
+
+    // hop offset (celebrate / quick hops / leap)
+    let hop = 0;
+    let landSquash = 0;
+    if (st.mode === 'celebrate') {
+      const cyc = Math.abs(Math.sin(st.modeT * 7));
+      hop = cyc * 16;
+      landSquash = Math.max(0, 1 - cyc * 3); // squash near the ground
+    } else if (t < st.hopUntil) {
+      hop = Math.abs(Math.sin((st.hopUntil - t) / 900 * Math.PI * 2)) * 10;
+    }
+    if (st.mode === 'leap') hop = 18;
+
+    const d = st.drag;
+    let sy = d.sy, sx = 1 / Math.sqrt(Math.max(0.6, d.sy));
+
+    // idle breathing
+    if (['idle', 'knead', 'scroll', 'think', 'pet'].includes(st.mode)) {
+      sy *= 1 + Math.sin(t / 1900 * Math.PI * 2) * 0.012;
+    } else if (st.mode === 'sleep') {
+      sy *= 1 + Math.sin(t / 3400 * Math.PI * 2) * 0.018;
+    }
+    // boop squash (springy dip)
+    const sinceBoop = t - st.boopT;
+    if (sinceBoop < 260) {
+      const k = Math.sin((sinceBoop / 260) * Math.PI);
+      sy *= 1 - 0.12 * k;
+      sx *= 1 + 0.08 * k;
+    }
+    // hop landing squash
+    if (landSquash > 0) {
+      sy *= 1 - 0.1 * landSquash;
+      sx *= 1 + 0.07 * landSquash;
+    }
+
+    const baseY = H - 12 - hop;
+    const cx = W / 2;
+
+    ctx.save();
+    ctx.translate(cx, baseY);
+    if (d.shear) ctx.transform(1, 0, d.shear, 1, 0, 0);
+    ctx.scale(sx * anim, sy * anim);
+
+    const ox = -(frame.w * px) / 2;
+    const oy = -(frame.h * px);
+    const gaze = computeGaze();
+    drawCat(ctx, frame, skin, px, ox, oy, {
+      flip,
+      heat: st.heat > 0.35 ? st.heat : 0,
+      eye: { style: eyeStyle(), gx: gaze.gx, gy: gaze.gy },
+      mouth: mouthStyle(),
+      blush: st.mode === 'pet' || sinceBoop < 900,
+      faceInk: faceInk(),
+      style: settings.skinStyle || 'plain',
+      overrides: settings.pixelOverrides || null,
+    });
+    ctx.restore();
+
+    // cat bbox in CSS px (for hit testing)
+    const bw = frame.w * px * sx * anim, bh = frame.h * px * sy * anim;
+    st.catBBox = { x: cx - bw / 2, y: baseY - bh, w: bw, h: bh };
+
+    // scroll paper
+    if (st.mode === 'scroll' && st.scrollLen > 2) drawPaper(px);
+
+    // a freshly-caught gift sits proudly at the cat's feet
+    if (st.shownGift) {
+      if (t > st.shownGift.until) st.shownGift = null;
+      else drawGift(ctx, st.shownGift.id, st.catBBox.x - 30, H - 12 - 27, 3);
+    }
+
+    // wake surprise
+    if (t < st.wakeUntil) drawMark('!', cx + st.catBBox.w / 2 + 6, st.catBBox.y - 14, '#ffd400');
+
+    // alert mark
+    if (st.mode === 'alert' && Math.floor(t / 350) % 2) {
+      drawMark('!', cx + st.catBBox.w / 2 + 8, st.catBBox.y - 16, '#ffd400');
+    }
+
+    // thinking dots
+    if (st.mode === 'think') drawThinkDots();
+
+    // question mark while a question is pending
+    if (st.mode === 'question' && Math.floor(t / 600) % 2) {
+      drawMark('?', cx + st.catBBox.w / 2 + 8, st.catBBox.y - 14, '#ffd400');
+    }
+
+    drawEffects();
+    drawChip();
+    drawLED();
+    if (!st.menu.open) drawBubbles();
+    // topmost: the "why is this light on" tooltip
+    if (st.ledHover && st.ledBox) drawLEDTooltip(st.ledBox.x + 5, st.ledBox.y + 5);
+  }
+
+  // subtle agent status LED, floating left of the cat's head; hover explains it
+  function drawLED() {
+    const t = now();
+    const { working, alert } = st.agents;
+    const doneFlash = t < st.doneFlashUntil;
+    if (!working && !alert && !doneFlash) { st.ledBox = null; st.ledHover = false; return; }
+    const b = st.catBBox;
+    const x = b.x - 13, y = b.y + 4;
+    let color, pulse;
+    if (alert > 0) {
+      color = '#ff5d52';
+      pulse = Math.floor(t / 300) % 2 ? 1 : 0.35; // urgent blink
+    } else if (working > 0) {
+      color = '#ffb83d';
+      pulse = 0.55 + 0.45 * Math.sin(t / 480); // soft breathing pulse
+    } else {
+      color = '#52d273';
+      pulse = 1;
+    }
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, 10, 10);
+    ctx.globalAlpha = Math.max(0.15, pulse);
+    ctx.fillStyle = color;
+    ctx.fillRect(x, y, 6, 6);
+    ctx.globalAlpha = 1;
+    const n = working + alert;
+    if (n > 1) PixelFont.draw(ctx, String(Math.min(n, 9)), x + 1, y + 10, 1, '#fdf8ec');
+    st.ledBox = { x: x - 5, y: y - 5, w: 16, h: 16 }; // generous hit area
+  }
+
+  function ledLine(d) {
+    const what = d.state === 'question' ? 'ASKING YOU'
+      : d.state === 'alert' ? 'NEEDS YOU'
+      : 'WORKING';
+    const age = d.sinceMin >= 1 ? ` ${d.sinceMin}M` : '';
+    return `${d.agent}${d.project ? ' (' + d.project.toUpperCase() + ')' : ''}: ${what}${age}`;
+  }
+
+  function drawLEDTooltip(lx, ly) {
+    const details = st.agents.details || [];
+    const lines = [];
+    for (const d of details.slice(0, 4)) {
+      lines.push(ledLine(d));
+      if (d.msg && d.state !== 'thinking') lines.push('  ' + truncate(d.msg.toUpperCase(), 38));
+    }
+    if (now() < st.doneFlashUntil && !lines.length) lines.push('JUST FINISHED!');
+    if (!lines.length) return;
+    lines.push('CLICK TO JUMP THERE');
+    const px = 1.5;
+    const lh = 7 * px;
+    const w = Math.max(...lines.map((l) => PixelFont.measure(l, px))) + 12;
+    const h = lines.length * lh + 8;
+    const x = Math.max(4, Math.min(W - w - 4, lx - 4));
+    const y = Math.max(4, ly - h - 8);
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#262430';
+    ctx.fillRect(x, y, w, h);
+    lines.forEach((l, i) => {
+      const last = i === lines.length - 1;
+      PixelFont.draw(ctx, l, x + 6, y + 5 + i * lh, px, last ? '#8a8794' : i % 2 === 0 || !l.startsWith(' ') ? '#fdf8ec' : '#b9b4c4');
+    });
+  }
+
+  function drawMark(chr, x, y, color) {
+    PixelFont.draw(ctx, chr, x, y, 3, color);
+  }
+
+  function drawPaper(px) {
+    const b = st.catBBox;
+    const y = H - 12 - px * 2;
+    const len = st.scrollLen * px * 0.8;
+    const x0 = b.x - len;
+    ctx.fillStyle = '#fffdf5';
+    ctx.fillRect(x0, y, len + b.w * 0.35, px * 1.6);
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(x0 + 8 + i * (len / 4 + 6), y + px * 0.5, Math.max(4, len / 7), px * 0.4);
+    }
+    // the roll
+    ctx.fillStyle = '#fffdf5';
+    ctx.fillRect(x0 - px * 1.5, y - px * 1.2, px * 2.4, px * 2.4 + px * 1.2);
+    ctx.fillStyle = '#d8d2c2';
+    ctx.fillRect(x0 - px * 0.8, y - px * 0.5, px, px);
+  }
+
+  function drawThinkDots() {
+    const b = st.catBBox;
+    const x = b.x + b.w + 8, y = b.y - 6;
+    const cyc = Math.floor(now() / 380) % 4;
+    bubbleRect(x - 4, y - 6, 34, 16);
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i < cyc ? '#2a2731' : 'rgba(42,39,49,0.25)';
+      ctx.fillRect(x + i * 10, y, 5, 5);
+    }
+  }
+
+  function drawEffects() {
+    for (const p of st.effects) {
+      const a = Math.max(0, Math.min(1, p.life / (p.maxLife * 0.6)));
+      ctx.globalAlpha = a;
+      if (p.type === 'heart') {
+        PixelFont.draw(ctx, '♥', p.x, p.y, 2, '#f4728c');
+      } else if (p.type === 'z') {
+        PixelFont.draw(ctx, 'Z', p.x, p.y, 2, '#9fb4d8');
+      } else if (p.type === 'steam') {
+        ctx.fillStyle = '#cfd6e4';
+        const s = 4 + (1 - a) * 5;
+        ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+      } else if (p.type === 'sparkle') {
+        ctx.fillStyle = '#ffd400';
+        ctx.fillRect(p.x - 1, p.y - 4, 2, 10);
+        ctx.fillRect(p.x - 4, p.y - 1, 10, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ------------------------------------------------------------ UI pieces
+  function bubbleRect(x, y, w, h) {
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#fffef8';
+    ctx.fillRect(x, y, w, h);
+  }
+
+  function wrapText(text, maxPx, px) {
+    const words = text.split(' ');
+    const lines = [];
+    let cur = '';
+    for (const w of words) {
+      const cand = cur ? cur + ' ' + w : w;
+      if (PixelFont.measure(cand, px) > maxPx && cur) {
+        lines.push(cur);
+        cur = w;
+      } else cur = cand;
+    }
+    if (cur) lines.push(cur);
+    return lines.slice(0, 4);
+  }
+
+  function drawBubbles() {
+    const t = now();
+    let topY = st.catBBox.y - 10;
+
+    if (st.bubble && t > st.bubble.until) st.bubble = null;
+    if (!st.bubble) st.bubbleBox = null;
+
+    if (st.question) {
+      // stable anchor: the panel must not bounce while the cat hops/celebrates
+      const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
+      topY = drawQuestionPanel(sitTop - 6) - 8;
+    } else if (st.bubble) {
+      topY = drawSpeech(st.bubble.text, topY, '#fffef8', '#14131a') - 8;
+    }
+
+    // pinned note
+    if (settings.fixedMessage && settings.fixedMessage.enabled && settings.fixedMessage.text) {
+      drawPinned(settings.fixedMessage.text.toUpperCase(), topY);
+    }
+  }
+
+  // interactive question panel: actual options from AskUserQuestion
+  function drawQuestionPanel(bottomY) {
+    const q = st.question;
+    const px = 2;
+    const w = Math.min(W - 16, 330);
+    const x = W / 2 - w / 2;
+    const lh = 7 * px;
+    const qLines = wrapText(q.question.toUpperCase(), w - 20, px).slice(0, 3);
+    const optH = 16;
+    const showOptions = q.options.length > 0;
+    const footH = 16;
+    const noteH = q.canType ? 0 : 12;
+    const h = 16 + qLines.length * lh + 4 + (showOptions ? q.options.length * (optH + 3) : 0) + noteH + footH + 8;
+    const y = bottomY - h - 8;
+
+    // frame
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#fffef8';
+    ctx.fillRect(x, y, w, h);
+    // tail to the cat
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(W / 2 - 4, y + h + 2, 8, 4);
+    ctx.fillStyle = '#fffef8';
+    ctx.fillRect(W / 2 - 2, y + h, 4, 4);
+
+    // title strip
+    ctx.fillStyle = '#ffd400';
+    ctx.fillRect(x, y, w, 12);
+    const title = `${q.agent} ASKS${q.header ? ' · ' + q.header.toUpperCase() : ''}`;
+    PixelFont.draw(ctx, title, x + 6, y + 3, px, '#14131a');
+
+    let cy = y + 16;
+    for (const line of qLines) {
+      PixelFont.draw(ctx, line, x + 8, cy, px, '#14131a');
+      cy += lh;
+    }
+    cy += 4;
+
+    q.boxes = [];
+    if (showOptions) {
+      q.options.forEach((label, i) => {
+        const bx = x + 8, bw = w - 16, by = cy;
+        const hovered = q.hover === i && q.canType;
+        ctx.fillStyle = '#14131a';
+        ctx.fillRect(bx - 1, by - 1, bw + 2, optH + 2);
+        ctx.fillStyle = hovered ? '#ffd400' : q.canType ? '#2a2933' : '#3a3942';
+        ctx.fillRect(bx, by, bw, optH);
+        const fg = hovered ? '#14131a' : '#fdf8ec';
+        PixelFont.draw(ctx, String(i + 1), bx + 5, by + 5, px, hovered ? '#14131a' : '#ffd400');
+        PixelFont.draw(ctx, truncate(label.toUpperCase(), 30), bx + 16, by + 5, px, fg);
+        q.boxes.push({ x: bx, y: by, w: bw, h: optH });
+        cy += optH + 3;
+      });
+    }
+
+    if (!q.canType) {
+      PixelFont.draw(ctx, q.multiSelect ? 'MULTI-SELECT: ANSWER IN TERMINAL' : 'ANSWER IN TERMINAL', x + 8, cy + 1, 1.5, '#8a8794');
+      cy += noteH;
+    }
+
+    // footer: status or buttons
+    const fy = cy + 2;
+    let statusText = null;
+    if (q.status.startsWith('typed:')) statusText = 'TYPED INTO ' + q.status.slice(6).toUpperCase();
+    else if (q.status.startsWith('focused:')) statusText = 'OPENED ' + q.status.slice(8).toUpperCase();
+    else if (q.status === 'notfound') statusText = 'WINDOW NOT FOUND';
+    if (statusText) {
+      PixelFont.draw(ctx, statusText, x + 8, fy + 3, 1.5, '#8a8794');
+    }
+    const mkBtn = (label, bx) => {
+      const bw = PixelFont.measure(label, 1.5) + 10;
+      ctx.fillStyle = '#14131a';
+      ctx.fillRect(bx - bw, fy, bw, 12);
+      PixelFont.draw(ctx, label, bx - bw + 5, fy + 3, 1.5, '#fdf8ec');
+      return { x: bx - bw, y: fy, w: bw, h: 12 };
+    };
+    q.dismissBox = mkBtn('DISMISS', x + w - 6);
+    q.openBox = q.tty ? mkBtn('OPEN', q.dismissBox.x - 5) : null;
+
+    q.panelBox = { x: x - 2, y: y - 2, w: w + 4, h: h + 6 };
+    return y;
+  }
+
+  function truncate(s, n) {
+    return s.length > n ? s.slice(0, n) : s;
+  }
+
+  // ------------------------------------------------------------- paw menu
+  function toggleMenu() {
+    if (st.menu.open && !st.menu.closing) closeMenu();
+    else openMenu();
+  }
+  function openMenu(page = 'root') {
+    st.menu.open = true;
+    st.menu.closing = false;
+    st.menu.page = page;
+    st.menu.hover = -1;
+    st.menu.anim = Math.max(st.menu.anim, 0.0001);
+    st.menu.lastTouchT = now();
+    st.bubble = null;
+    CatAudio.pop();
+  }
+  function closeMenu() {
+    if (!st.menu.open) return;
+    st.menu.closing = true;
+  }
+
+
+  // ------------------------------------------- modern DOM panel for the menu
+  const ui = document.getElementById('ui');
+  let panelEl = null;
+
+  function mkIcon(name, color = '#ffd400') {
+    const cv = document.createElement('canvas');
+    cv.width = 18; cv.height = 18;
+    cv.className = 'ic';
+    drawIcon(cv.getContext('2d'), name, 0, 0, 2, color);
+    return cv;
+  }
+
+  function fmtDue(due) {
+    const d = new Date(due);
+    const today = new Date();
+    const hh = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    if (d.toDateString() === today.toDateString()) return hh;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh;
+  }
+
+  function menuTitle() {
+    const p = st.menu.page;
+    const nm = (settings.catName || '').trim();
+    return p === 'root' ? (nm ? nm + "'s menu" : 'Cat menu')
+      : p === 'apps' ? 'Apps' : p === 'tasks' ? 'To-dos' : p === 'inbox' ? 'Inbox'
+      : p === 'journal' ? 'Journal' : p === 'shelf' ? 'Shelf' : 'More';
+  }
+
+  function row(opts) {
+    const el = document.createElement('div');
+    el.className = 'row' + (opts.cls ? ' ' + opts.cls : '');
+    if (opts.check != null) {
+      const c = document.createElement('div');
+      c.className = 'check' + (opts.check ? ' on' : '');
+      el.appendChild(c);
+    } else if (opts.giftId) {
+      const cv = document.createElement('canvas');
+      cv.width = 18; cv.height = 18;
+      cv.className = 'ic';
+      drawGift(cv.getContext('2d'), opts.giftId, 0, 0, 2);
+      el.appendChild(cv);
+    } else {
+      el.appendChild(mkIcon(opts.icon || 'dot', opts.iconColor));
+    }
+    const tx = document.createElement('div');
+    tx.className = 'tx';
+    const lb = document.createElement('div');
+    lb.className = 'lb' + (opts.done ? ' done' : '');
+    lb.textContent = opts.label;
+    tx.appendChild(lb);
+    if (opts.hint) {
+      const h = document.createElement('div');
+      h.className = 'hint';
+      h.textContent = opts.hint;
+      tx.appendChild(h);
+    }
+    el.appendChild(tx);
+    if (opts.chip) {
+      const chip = document.createElement('div');
+      chip.className = 'due' + (opts.chipCls ? ' ' + opts.chipCls : '');
+      chip.textContent = opts.chip;
+      if (opts.onChip) chip.addEventListener('mousedown', (e) => { e.stopPropagation(); CatAudio.pop(); opts.onChip(); });
+      el.appendChild(chip);
+    }
+    if (opts.onClick) {
+      el.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        st.menu.lastTouchT = now();
+        CatAudio.pop();
+        opts.onClick();
+      });
+    }
+    return el;
+  }
+
+  function renderMenuDom() {
+    if (!panelEl) return;
+    panelEl.innerHTML = '';
+    const title = document.createElement('div');
+    title.className = 'panel-title';
+    title.innerHTML = `<span>${menuTitle()}</span><span class="esc">click away to close</span>`;
+    panelEl.appendChild(title);
+
+    const goto = (page) => () => { st.menu.page = page; renderMenuDom(); };
+    const act = (a, close = true) => () => { pixelpaw.menuAction(a); if (close) closeMenu(); };
+    const tasks = settings.tasks || [];
+    const open = tasks.filter((t) => !t.done);
+
+    if (st.menu.page === 'root') {
+      const appsHint = (settings.launcher.apps || []).map((a) => a.label).join(' · ') || 'none set';
+      panelEl.appendChild(row({ icon: 'mic', label: 'Voice', hint: 'dictate with Murmur', onClick: act({ type: 'voice' }) }));
+      panelEl.appendChild(row({ icon: 'rocket', label: 'Apps', hint: appsHint.toLowerCase(), onClick: goto('apps') }));
+      const dueSoon = open.filter((t) => t.due && t.due - Date.now() < 3600000).length;
+      panelEl.appendChild(row({
+        icon: 'tasks', label: 'To-dos',
+        hint: `${open.length} open${dueSoon ? ` · ${dueSoon} due soon` : ''}`,
+        onClick: goto('tasks'),
+      }));
+      panelEl.appendChild(row({ icon: 'msg', label: 'Inbox', hint: `${st.inbox.length} message${st.inbox.length === 1 ? '' : 's'}`, onClick: goto('inbox') }));
+      panelEl.appendChild(row({ icon: 'gear', label: 'More', hint: 'journal · shelf · settings', onClick: goto('more') }));
+    } else if (st.menu.page === 'apps') {
+      for (const a of settings.launcher.apps || []) {
+        panelEl.appendChild(row({ icon: 'app', label: a.label, hint: a.app, onClick: act({ type: 'app', app: a.app }) }));
+      }
+      if (!(settings.launcher.apps || []).length) {
+        const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'No apps yet — add them in Settings → Launcher.';
+        panelEl.appendChild(e);
+      }
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
+    } else if (st.menu.page === 'tasks') {
+      const shown = [...tasks.filter((t) => !t.done), ...tasks.filter((t) => t.done)].slice(0, 6);
+      for (const t of shown) {
+        const overdue = t.due && !t.done && t.due < Date.now();
+        panelEl.appendChild(row({
+          cls: 'task', check: !!t.done, done: t.done, label: t.text,
+          chip: t.due ? (overdue ? 'snooze +10m' : fmtDue(t.due)) : null,
+          chipCls: overdue ? 'overdue snooze' : '',
+          onChip: overdue ? () => pixelpaw.tasksSnooze(t.id) : null,
+          onClick: () => pixelpaw.tasksToggle(t.id),
+        }));
+      }
+      if (!shown.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = 'Nothing yet. Try: "standup @ 9:30" or "call mom @ +30m"';
+        panelEl.appendChild(e);
+      }
+      // inline add
+      const bar = document.createElement('div');
+      bar.className = 'addbar';
+      const input = document.createElement('input');
+      input.id = 'todoInput';
+      input.placeholder = 'Add… e.g. review PR @ 16:30';
+      input.addEventListener('mousedown', (e) => { e.stopPropagation(); pixelpaw.setFocusable(true); setTimeout(() => input.focus(), 60); });
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        st.menu.lastTouchT = now();
+        if (e.key === 'Enter') submit();
+      });
+      const btn = document.createElement('button');
+      btn.textContent = 'Add';
+      const submit = () => {
+        const v = input.value.trim();
+        if (!v) return;
+        pixelpaw.tasksAdd(v);
+        input.value = '';
+        CatAudio.pop();
+      };
+      btn.addEventListener('mousedown', (e) => { e.stopPropagation(); submit(); });
+      bar.appendChild(input);
+      bar.appendChild(btn);
+      panelEl.appendChild(bar);
+      if (tasks.some((t) => t.done)) {
+        panelEl.appendChild(row({ icon: 'check', label: 'Clear done', onClick: () => pixelpaw.tasksClearDone() }));
+      }
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
+    } else if (st.menu.page === 'inbox') {
+      const items = st.inbox || [];
+      items.slice(0, 8).forEach((m, i) => {
+        const expanded = st.menu.inboxExpanded === i;
+        const age = Math.max(0, Math.round((Date.now() - m.t) / 60000));
+        const when = new Date(m.t);
+        const hh = String(when.getHours()).padStart(2, '0') + ':' + String(when.getMinutes()).padStart(2, '0');
+        panelEl.appendChild(row({
+          cls: expanded ? 'wrap' : 'msgrow',
+          icon: 'msg', label: m.text,
+          hint: expanded ? `${m.kind || 'message'} · ${hh} · ${age < 60 ? age + 'm ago' : Math.round(age / 60) + 'h ago'}` : null,
+          chip: expanded ? null : age < 60 ? age + 'm' : Math.round(age / 60) + 'h',
+          onClick: () => { st.menu.inboxExpanded = expanded ? null : i; renderMenuDom(); },
+        }));
+      });
+      if (!items.length) {
+        const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Reminders, agent turns and /say messages land here.';
+        panelEl.appendChild(e);
+      }
+      if (items.length) {
+        panelEl.appendChild(row({ icon: 'check', label: 'Clear inbox', onClick: () => { pixelpaw.inboxClear(); st.menu.inboxExpanded = null; } }));
+      }
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
+    } else if (st.menu.page === 'journal') {
+      const b = st.bond || {};
+      const hearts = '♥'.repeat(b.level || 1) + '♡'.repeat(Math.max(0, 5 - (b.level || 1)));
+      const levelNames = ['', 'New friends', 'Warming up', 'Buddies', 'Close', 'Soulmates'];
+      const c = b.counters || {};
+      const r = b.records || {};
+      panelEl.appendChild(row({ icon: 'dot', label: `${hearts}  ${levelNames[b.level || 1]}`, hint: 'grows with pets, to-dos, focus, agent runs' }));
+      panelEl.appendChild(row({ icon: 'dot', label: `${b.daysTogether || 0} days together`, hint: b.adoptedAt ? 'since ' + new Date(b.adoptedAt).toLocaleDateString() : null }));
+      panelEl.appendChild(row({ icon: 'dot', label: `Streak: ${b.streak || 0} (best ${b.bestStreak || 0})`, hint: 'weekends never break it' }));
+      panelEl.appendChild(row({ icon: 'tasks', label: `${c.todosDone || 0} to-dos · ${c.pomodoros || 0} pomodoros`, hint: `best day: ${r.todosInDay || 0} to-dos, ${r.pomodorosInDay || 0} pomodoros` }));
+      panelEl.appendChild(row({ icon: 'mic', label: `${c.pets || 0} pets · ${c.boops || 0} boops`, hint: `${c.agentRuns || 0} agent runs watched together` }));
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('more') }));
+    } else if (st.menu.page === 'shelf') {
+      const giftsOwned = (st.bond && st.bond.gifts) || [];
+      const counts = {};
+      for (const g of giftsOwned) counts[g.id] = (counts[g.id] || 0) + 1;
+      const ids = Object.keys(counts);
+      ids.slice(0, 6).forEach((id) => {
+        const g = GIFTS[id] || { name: id, rarity: '?' };
+        panelEl.appendChild(row({
+          giftId: id, label: g.name + (counts[id] > 1 ? ` ×${counts[id]}` : ''),
+          hint: g.rarity, cls: 'msgrow',
+        }));
+      });
+      if (!ids.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = 'Nothing yet — it hunts at night, after good days together.';
+        panelEl.appendChild(e);
+      } else {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = `${ids.length}/${Object.keys(GIFTS).length} kinds collected`;
+        panelEl.appendChild(e);
+      }
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('more') }));
+    } else {
+      panelEl.appendChild(row({ icon: 'dot', label: 'Journal', hint: 'your story so far', onClick: goto('journal') }));
+      panelEl.appendChild(row({ icon: 'dot', label: 'Shelf', hint: 'gifts it caught for you', onClick: goto('shelf') }));
+      panelEl.appendChild(row({ icon: 'gear', label: 'Settings', onClick: act({ type: 'settings' }) }));
+      panelEl.appendChild(row({ icon: 'rocket', label: 'Stretch now', onClick: act({ type: 'stretch' }) }));
+      panelEl.appendChild(row({ icon: 'dot', label: 'Hide cat', onClick: act({ type: 'hide' }) }));
+      panelEl.appendChild(row({ icon: 'dot', label: 'Quit PixelPaw', onClick: act({ type: 'quit' }, false) }));
+      panelEl.appendChild(sep());
+      panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
+    }
+  }
+
+  function sep() {
+    const s = document.createElement('div');
+    s.className = 'sep';
+    return s;
+  }
+
+  function syncMenuDom() {
+    const m = st.menu;
+    if (m.open && !panelEl) {
+      panelEl = document.createElement('div');
+      panelEl.className = 'panel';
+      const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
+      panelEl.style.bottom = (H - sitTop + 14) + 'px';
+      ui.appendChild(panelEl);
+      renderMenuDom();
+      requestAnimationFrame(() => panelEl && panelEl.classList.add('open'));
+    } else if (!m.open && panelEl) {
+      panelEl.remove();
+      panelEl = null;
+      pixelpaw.setFocusable(false);
+    } else if (m.open && panelEl) {
+      panelEl.classList.toggle('open', !m.closing);
+    }
+  }
+
+  function drawSpeech(text, bottomY, bg, fg) {
+    const px = 2;
+    const maxW = W - 30;
+    const lines = wrapText(text, maxW, px);
+    const lh = 7 * px;
+    const w = Math.min(maxW, Math.max(...lines.map((l) => PixelFont.measure(l, px)))) + 16;
+    const h = lines.length * lh + 10;
+    const x = Math.max(4, Math.min(W - w - 4, W / 2 - w / 2));
+    const y = bottomY - h - 8;
+    st.bubbleBox = { x: x - 2, y: y - 2, w: w + 4, h: h + 12 }; // clickable -> inbox
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = bg;
+    ctx.fillRect(x, y, w, h);
+    // tail
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(W / 2 - 4, y + h + 2, 8, 4);
+    ctx.fillStyle = bg;
+    ctx.fillRect(W / 2 - 2, y + h, 4, 4);
+    lines.forEach((l, i) => {
+      const lw = PixelFont.measure(l, px);
+      PixelFont.draw(ctx, l, x + (w - lw) / 2, y + 6 + i * lh, px, fg);
+    });
+    return y;
+  }
+
+  function drawPinned(text, bottomY) {
+    const px = 2;
+    const maxW = W - 40;
+    const lines = wrapText(text, maxW, px);
+    const lh = 7 * px;
+    const w = Math.min(maxW, Math.max(...lines.map((l) => PixelFont.measure(l, px)))) + 18;
+    const h = lines.length * lh + 10;
+    const x = W / 2 - w / 2;
+    const y = bottomY - h - 6;
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#ffe98a';
+    ctx.fillRect(x, y, w, h);
+    // pin
+    ctx.fillStyle = '#e0483e';
+    ctx.fillRect(x + w / 2 - 2, y - 5, 5, 5);
+    lines.forEach((l, i) => {
+      const lw = PixelFont.measure(l, px);
+      PixelFont.draw(ctx, l, x + (w - lw) / 2, y + 6 + i * lh, px, '#14131a');
+    });
+  }
+
+  function drawChip() {
+    st.chipBBox = null;
+    const p = st.pom;
+    if (!p || p.phase === 'off') return;
+    const px = 2;
+    const label = p.phase === 'focus' ? 'FOCUS' : p.phase === 'long' ? 'CHILL' : 'BREAK';
+    const time = fmt(p.remaining);
+    const tw = Math.max(PixelFont.measure(label, px), PixelFont.measure(time, px + 1));
+    const w = tw + 16, h = 30;
+    let x = st.catBBox.x + st.catBBox.w + 8;
+    if (x + w > W - 4) x = st.catBBox.x - w - 8;
+    const y = st.catBBox.y + st.catBBox.h - h - 4;
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = p.paused ? '#6a6a74' : p.phase === 'focus' ? '#e0483e' : '#3ba55d';
+    ctx.fillRect(x, y, w, 4);
+    ctx.fillStyle = '#1f1e26';
+    ctx.fillRect(x, y + 4, w, h - 4);
+    PixelFont.draw(ctx, label, x + 8, y + 8, px, '#9a98a6');
+    PixelFont.draw(ctx, p.paused ? 'II ' + time : time, x + 8, y + 8 + 8, px + 1, '#fffef8');
+    st.chipBBox = { x, y, w, h };
+  }
+
+  function fmt(sec) {
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  // -------------------------------------------------------------- main loop
+  let lastT = now();
+  function loop() {
+    const t = now();
+    const dt = Math.min(0.1, (t - lastT) / 1000);
+    lastT = t;
+    update(dt);
+    render();
+    requestAnimationFrame(loop);
+  }
+  loop();
+
+  // state snapshot for the automated test harness
+  window.__catDebug = () => ({
+    ready: true,
+    mode: st.mode,
+    heat: +st.heat.toFixed(3),
+    kps: st.kps,
+    scrollLen: Math.round(st.scrollLen),
+    bubble: st.bubble ? st.bubble.text : null,
+    bubbleBox: st.bubbleBox || null,
+    pinned: !!(settings.fixedMessage && settings.fixedMessage.enabled && settings.fixedMessage.text),
+    pom: st.pom ? { phase: st.pom.phase, paused: !!st.pom.paused, remaining: st.pom.remaining } : null,
+    pet: st.pet.active,
+    petMeter: Math.round(st.pet.meter),
+    dragActive: st.drag.active,
+    draggingEngaged: st.draggingEngaged,
+    hunt: st.hunt.phase,
+    gaze: computeGaze(),
+    sinceBoopMs: Math.round(now() - st.boopT),
+    catBBox: st.catBBox,
+    chipBBox: st.chipBBox,
+    interactive: st.interactive,
+    idleSec: st.idleSec,
+    agents: st.agents,
+    ledBox: st.ledBox,
+    ledHover: st.ledHover,
+    doneFlash: now() < st.doneFlashUntil,
+    lastInput: st.lastInput || null,
+    mouseDownArmed: !!st.mouseDown,
+    menu: st.menu.open && panelEl ? (() => {
+      const rows = [...panelEl.querySelectorAll('.row')];
+      const rect = (r) => ({ x: r.left, y: r.top, w: r.width, h: r.height });
+      const pr = panelEl.getBoundingClientRect();
+      return {
+        page: st.menu.page,
+        title: (panelEl.querySelector('.panel-title span') || {}).textContent || '',
+        anim: +st.menu.anim.toFixed(2),
+        labels: rows.map((r) => (r.querySelector('.lb') || {}).textContent || ''),
+        boxes: rows.map((r) => rect(r.getBoundingClientRect())),
+        chips: [...panelEl.querySelectorAll('.due')].map((c) => ({ text: c.textContent, ...rect(c.getBoundingClientRect()) })),
+        hasInput: !!panelEl.querySelector('#todoInput'),
+        panelBox: rect(pr),
+      };
+    })() : null,
+    overridesCount: settings.pixelOverrides ? Object.keys(settings.pixelOverrides).length : 0,
+    bond: { xp: st.bond.xp, level: st.bond.level, gifts: (st.bond.gifts || []).length, streak: st.bond.streak, daysTogether: st.bond.daysTogether },
+    shownGift: st.shownGift ? st.shownGift.id : null,
+    tasksOpen: (settings.tasks || []).filter((t) => !t.done).length,
+    tasksDone: (settings.tasks || []).filter((t) => t.done).length,
+    inboxCount: st.inbox.length,
+    question: st.question ? {
+      qid: st.question.qid,
+      options: st.question.options,
+      canType: st.question.canType,
+      status: st.question.status,
+      boxes: st.question.boxes,
+      openBox: st.question.openBox,
+      dismissBox: st.question.dismissBox,
+      panelBox: st.question.panelBox,
+    } : null,
+    skin: settings.skin,
+  });
+
+  // a named cat introduces itself once per launch
+  setTimeout(() => {
+    const nm = (settings.catName || '').trim();
+    if (nm) showBubble(`HI, I'M ${nm.toUpperCase()}!`, 4500);
+  }, 1600);
+
+  window.__catReady = true;
+})();
