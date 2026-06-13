@@ -1,0 +1,23 @@
+{
+  "name": "pixelpaw",
+  "productName": "PixelPaw",
+  "version": "1.0.0",
+  "description": "A pixel cat that lives on your desktop \u2014 reacts to your mouse, keyboard, and AI agents",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke",
+    "preview": "node tools/preview.js",
+    "test": "electron . --test /tmp/pixelpaw-test"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "uiohook-napi": "^1.5.5"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0"
+  },
+  "bin": {
+    "pawcat": "./tools/pawcat.js"
+  }
+}
