@@ -472,13 +472,15 @@
         : Math.abs(lum(skin.pupil) - lum(skin.headL)) < 50 && size >= 5
           ? hex3(mixRgb(hexToRgb(skin.headL), [110, 116, 138], 0.45))
           : skin.pupil;
-      let pupilSize = size >= 5 ? 3 : 2;
-      if (eye.dilate) pupilSize = Math.min(pupilSize + 1, (eyes.h || size) , size - 1);
-      const span = size - pupilSize; // horizontal pupil travel
-      const vspan = Math.max(0, sh - pupilSize);
-      const gx = Math.max(0, Math.min(span, eye.gx ?? 1));
-      const gy = Math.max(0, Math.min(vspan, eye.gy ?? 1));
-      ctx.fillRect(Ex + gx * px, Ey + gy * px, pupilSize * px, Math.min(pupilSize, sh) * px);
+      let pw = size >= 5 ? 3 : 2;            // pupil width
+      let ph = Math.min(pw, sh);             // pupil height
+      if (eye.dilate) {                       // interest/affection: wider, rounder
+        pw = Math.min(pw + 1, size - 1);
+        ph = Math.min(ph + 1, sh);
+      }
+      const gx = Math.max(0, Math.min(size - pw, eye.gx ?? 1));
+      const gy = Math.max(0, Math.min(sh - ph, eye.gy ?? 1));
+      ctx.fillRect(Ex + gx * px, Ey + gy * px, pw * px, ph * px);
       if (size >= 5) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(Ex + gx * px, Ey + gy * px, px, px); // glint
