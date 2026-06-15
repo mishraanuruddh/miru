@@ -281,6 +281,8 @@ async function runScenarios(ctx) {
       if (x.lastInput) throw new Error('input arrived but no boop: ' + JSON.stringify({ in: x.lastInput, bbox: x.catBBox, armed: x.mouseDownArmed }));
       return false;
     }, 'boop registered', 2500);
+    // booping earns a slow affection blink back (latched timestamp avoids races)
+    await waitFor(async () => (await debug()).sinceSlowBlinkMs < 900, 'slow blink after boop', 1500);
     await wait(120);
     await cap('boop');
   });
@@ -805,6 +807,10 @@ async function runScenarios(ctx) {
     await post('/hook/claude/ask-done', { session_id: 's1' });
     await post('/hook/claude/end', { session_id: 's1' });
     await post('/hook/claude/end', { session_id: 's2-no-tty' });
+    // drowsy half-lidded eyes just before the nap
+    setTick({ idleSec: 235, vel: 0 });
+    await waitFor(async () => (await debug()).eyeStyle === 'squint', 'drowsy eyes before sleep', 4000);
+    await cap('drowsy');
     setTick({ idleSec: 400, vel: 0 });
     const d = await waitFor(async () => {
       const x = await debug();
@@ -814,7 +820,18 @@ async function runScenarios(ctx) {
     await cap('sleep');
     setTick({ idleSec: 0, vel: 200 });
     await waitFor(async () => (await debug()).mode === 'idle', 'awake');
-    await cap('wake');
+    // waking yawns: scrunched eyes + open mouth
+    await waitFor(async () => (await debug()).yawning === true, 'yawn on wake', 1500);
+    await cap('yawn');
+  });
+
+  await scenario('micro-anims: idle ear-flick + dilation when cursor is near', async () => {
+    setTick({ idleSec: 5, vel: 0, cursor: { x: 190, y: 60 } });
+    await waitFor(async () => (await debug()).mode === 'idle', 'idle');
+    // ear flick fires within its random window (max ~16s)
+    await waitFor(async () => (await debug()).frame === 'sit_flick', 'ear flick frame appears', 20000);
+    await cap('ear-flick');
+    // (dilation is a render-only detail; covered visually via the boop/pet shots)
   });
 
   await scenario('sprite styles: kawaii default, classic backup switches', async () => {

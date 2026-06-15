@@ -84,6 +84,13 @@
     pom: null,
     blinkUntil: -1e9,
     nextBlinkT: now() + 3000,
+    slowBlinkUntil: -1e9,      // affection "cat kiss"
+    slowBlinkAt: -1e9,
+    nextSlowBlinkT: now() + 15000,
+    earFlickUntil: -1e9,
+    nextEarFlickT: now() + 8000,
+    yawnUntil: -1e9,
+    idleEnterMode: null,       // what we were doing before settling into idle
     wander: { active: false, gaze: { gx: 1, gy: 1 }, nextAt: 0, stillSince: 0 },
     tailIdx: 0,
     tailT: 0,
@@ -400,6 +407,8 @@
     } else if (st.mouseDown) {
       // boop!
       st.boopT = now();
+      st.slowBlinkUntil = now() + 460; // a slow, content blink back at you
+      st.slowBlinkAt = now();
       CatAudio.pop();
       spawnHearts(1);
       pixelpaw.bondEvent('boop');
@@ -478,7 +487,9 @@
       st.modeT = 0;
       if (prev === 'sleep' && m !== 'sleep') {
         st.wakeUntil = t + 700;
+        st.yawnUntil = t + 850; // a big yawn on waking
       }
+      if (m === 'idle') st.idleEnterMode = prev;
       if (m === 'sleep') st.sleepingSince = t;
     } else {
       st.modeT += dt;
@@ -508,6 +519,17 @@
     if (t > st.nextBlinkT) {
       st.blinkUntil = t + 130;
       st.nextBlinkT = t + 2600 + Math.random() * 3500;
+    }
+    // affection slow-blinks: friends (bond ≥ 2) "cat-kiss" now and then when calm
+    if (st.mode === 'idle' && (st.bond.level || 1) >= 2 && t > st.nextSlowBlinkT) {
+      st.slowBlinkUntil = t + 520;
+      st.slowBlinkAt = t;
+      st.nextSlowBlinkT = t + 12000 + Math.random() * 11000;
+    }
+    // ear flick: a little involuntary twitch while idle
+    if (st.mode === 'idle' && t > st.nextEarFlickT) {
+      st.earFlickUntil = t + 240;
+      st.nextEarFlickT = t + 7000 + Math.random() * 9000;
     }
 
     // paw menu animation + auto-fade when ignored
@@ -539,8 +561,8 @@
       }
     }
 
-    // tail sway
-    st.tailT += dt * (st.mode === 'knead' || st.mode === 'overheat' ? 2.2 : st.mode === 'think' ? 1.6 : 1);
+    // tail sway (a happy quiver while being petted)
+    st.tailT += dt * (st.mode === 'pet' ? 2.6 : st.mode === 'knead' || st.mode === 'overheat' ? 2.2 : st.mode === 'think' ? 1.6 : 1);
     if (st.tailT > 0.55) {
       st.tailT = 0;
       st.tailIdx = (st.tailIdx + 1) % 4;
@@ -583,6 +605,7 @@
       case 'zoomies': return { f: Math.floor(t / 80) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: Math.floor(t / 700) % 2 === 0 };
       case 'scroll': return { f: Math.floor(t / 380) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
       default: {
+        if (t < st.earFlickUntil && FRAMES.sit_flick) return { f: FRAMES.sit_flick };
         const tails = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
         return { f: tails[st.tailIdx] };
       }
@@ -592,10 +615,14 @@
   function eyeStyle() {
     const t = now();
     if (st.mode === 'sleep') return 'closed';
+    if (t < st.yawnUntil) return 'squint';     // scrunched mid-yawn
+    if (t < st.slowBlinkUntil) return 'closed'; // affection cat-kiss
     if (t < st.blinkUntil) return 'closed';
     if (st.mode === 'pet' || st.mode === 'caught') return 'happy';
     if (st.mode === 'celebrate') return st.modeT > 0.5 ? 'happy' : 'open';
     if (st.mode === 'overheat' && st.heat > 0.85) return 'squint';
+    // drowsy: heavy half-lidded eyes in the seconds before a nap
+    if (st.mode === 'idle' && settings.reactions.sleep && st.idleSec > 232) return 'squint';
     return 'open';
   }
 
@@ -627,6 +654,7 @@
   }
 
   function mouthStyle() {
+    if (now() < st.yawnUntil) return 'open'; // wide yawn
     if (st.mode === 'celebrate' || (st.mode === 'overheat' && st.heat > 0.8)) return 'open';
     if (st.mode === 'pet' || st.mode === 'caught' || now() - st.boopT < 900) return 'w';
     return 'w'; // resting cat face: the little \u03c9
@@ -683,6 +711,13 @@
       sy *= 1 - 0.1 * landSquash;
       sx *= 1 + 0.07 * landSquash;
     }
+    // jelly resettle: a quick decaying wobble when calming down from excitement
+    if (st.mode === 'idle' && st.modeT < 0.7 &&
+        ['celebrate', 'hunt', 'leap', 'caught', 'stretch', 'zoomies', 'drag'].includes(st.idleEnterMode)) {
+      const k = Math.exp(-st.modeT * 6) * Math.sin(st.modeT * 34);
+      sy *= 1 + 0.07 * k;
+      sx *= 1 - 0.05 * k;
+    }
 
     const baseY = H - 12 - hop;
     const cx = W / 2;
@@ -695,10 +730,17 @@
     const ox = -(frame.w * px) / 2;
     const oy = -(frame.h * px);
     const gaze = computeGaze();
+    // pupils dilate with interest: when the cursor is near, or while adored
+    let dilate = st.mode === 'pet' || sinceBoop < 900;
+    if (!dilate && settings.reactions.eyeFollow && st.catBBox.w) {
+      const b = st.catBBox;
+      const near = Math.hypot(st.cursor.x - (b.x + b.w / 2), st.cursor.y - (b.y + b.h / 2)) < b.w * 0.85;
+      dilate = near;
+    }
     drawCat(ctx, frame, skin, px, ox, oy, {
       flip,
       heat: st.heat > 0.35 ? st.heat : 0,
-      eye: { style: eyeStyle(), gx: gaze.gx, gy: gaze.gy },
+      eye: { style: eyeStyle(), gx: gaze.gx, gy: gaze.gy, dilate },
       mouth: mouthStyle(),
       blush: st.mode === 'pet' || sinceBoop < 900,
       faceInk: faceInk(),
@@ -1373,6 +1415,12 @@
     draggingEngaged: st.draggingEngaged,
     hunt: st.hunt.phase,
     gaze: computeGaze(),
+    eyeStyle: eyeStyle(),
+    mouthStyle: mouthStyle(),
+    frame: pickFrame().f === FRAMES.sit_flick ? 'sit_flick' : null,
+    yawning: now() < st.yawnUntil,
+    slowBlinking: now() < st.slowBlinkUntil,
+    sinceSlowBlinkMs: Math.round(now() - st.slowBlinkAt),
     sinceBoopMs: Math.round(now() - st.boopT),
     catBBox: st.catBBox,
     chipBBox: st.chipBBox,
