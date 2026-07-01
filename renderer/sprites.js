@@ -13,6 +13,7 @@
   const REGION_OF = {
     L: 'headL', R: 'headR', M: 'muzzle', i: 'innerEar', n: 'nose',
     B: 'body', C: 'chest', F: 'paws', T: 'tail', t: 'tailTip', w: 'outline',
+    P: 'pawUp', // raised paw: auto-shaded vs the fur so it reads on solid cats
   };
 
   // ------------------------------------------------------------------ skins
@@ -382,18 +383,21 @@
   // Draw the full cat. Fur is always the skin's true colors — overheat is
   // conveyed by steam/panting in the renderer, never by tinting pixels. opts:
   //   flip, alpha,
-  //   eye: {style: 'open'|'closed'|'happy'|'squint', gx:0..2, gy:0..2}
-  //   mouth: 'none'|'smile'|'open'|'w', blush: bool
+  //   eye: {style: 'open'|'closed'|'happy'|'squint', gx:0..2, gy:0..2, dilate}
+  //   mouth: 'none'|'smile'|'open'|'w'|'mlem', blush: bool, freckles: bool
+  //   tilt: ±1 curious head-lean (rows shear sideways, strongest at the top)
   function drawCat(ctx, frame, skin, px, ox, oy, opts = {}) {
     const { rows, w } = frame;
     const X = (x) => ox + (opts.flip ? w - 1 - x : x) * px;
+    // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top
+    const SH = (y) => (opts.tilt ? Math.round(opts.tilt * (rows.length - 1 - y) / 8) * px : 0);
     ctx.save();
     if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
 
     // outline
     ctx.fillStyle = skin.outline || CREAM;
     for (const [x, y] of getOutline(frame)) {
-      ctx.fillRect(X(x), oy + y * px, px, px);
+      ctx.fillRect(X(x) + SH(y), oy + y * px, px, px);
     }
 
     // body pixels (+ optional pattern overlay: tabby stripes / spots)
@@ -407,13 +411,18 @@
         if (ch === '.') continue;
         const region = REGION_OF[ch];
         if (!region) continue;
-        let color = skin[region] || '#ff00ff';
+        let color = skin[region];
+        if (!color && region === 'pawUp') {
+          const pl = lum(skin.paws);
+          color = hex3(mixRgb(hexToRgb(skin.paws), pl > 140 ? [0, 0, 0] : [255, 255, 255], pl > 140 ? 0.2 : 0.3));
+        }
+        if (!color) color = '#ff00ff';
         if (style !== 'plain' && STRIPEABLE[region]) {
           if (style === 'tabby' && (x + y * 2) % 6 < 2) color = patternColor;
           else if (style === 'spots' && (((x >> 1) * 37 + (y >> 1) * 53) % 23) < 4) color = patternColor;
         }
         ctx.fillStyle = color;
-        ctx.fillRect(X(x), oy + y * px, px, px);
+        ctx.fillRect(X(x) + SH(y), oy + y * px, px, px);
       }
     }
 
@@ -426,7 +435,7 @@
         const ch = rows[py2][px2];
         if (!ch || ch === '.' || ch === 'w') continue;
         ctx.fillStyle = opts.overrides[key];
-        ctx.fillRect(X(px2), oy + py2 * px, px, px);
+        ctx.fillRect(X(px2) + SH(py2), oy + py2 * px, px, px);
       }
     }
 
@@ -442,7 +451,7 @@
       if (!e) continue;
       let exArt = e[0];
       if (opts.flip) exArt = w - exArt - size;
-      const Ex = ox + exArt * px, Ey = oy + e[1] * px;
+      const Ex = ox + exArt * px + SH(e[1]), Ey = oy + e[1] * px;
       if (eye.style === 'closed' || eye.style === 'squint') {
         ctx.fillStyle = ink;
         ctx.fillRect(Ex, Ey + ((eyes.h || size) - 1.4) * px, size * px, px);
@@ -478,20 +487,48 @@
       ctx.fillRect(Ex + gx * px, Ey + gy * px, pw * px, ph * px);
       if (size >= 5) {
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Ex + gx * px, Ey + gy * px, px, px); // glint
+        ctx.fillRect(Ex + gx * px, Ey + gy * px, px, px); // main catchlight
+        if (pw >= 3 && ph >= 3) {
+          // satellite catchlight opposite the main one: wet-eye sparkle
+          ctx.fillStyle = 'rgba(255,255,255,0.55)';
+          ctx.fillRect(Ex + (gx + pw - 1) * px, Ey + (gy + ph - 1) * px, px, px);
+        }
       }
+    }
+
+    // whisker freckles: two faint dots per cheek, only where fur exists
+    if (opts.freckles && eyes.l && eyes.r) {
+      const baseAlpha = opts.alpha != null ? opts.alpha : 1;
+      ctx.fillStyle = ink;
+      ctx.globalAlpha = baseAlpha * 0.3;
+      const dots = [
+        [eyes.l[0] - 2, eyes.l[1] + 3], [eyes.l[0] - 1, eyes.l[1] + 4],
+        [eyes.r[0] + size + 1, eyes.r[1] + 3], [eyes.r[0] + size, eyes.r[1] + 4],
+      ];
+      for (const [fx, fy] of dots) {
+        const ch = rows[fy] && rows[fy][fx];
+        if (ch !== 'L' && ch !== 'R') continue;
+        ctx.fillRect(X(fx) + SH(fy), oy + fy * px, px, px);
+      }
+      ctx.globalAlpha = baseAlpha;
     }
 
     // mouth marks
     if (frame.mouth && opts.mouth && opts.mouth !== 'none') {
       const [mx, my] = frame.mouth;
-      const Mx = ox + (opts.flip ? w - mx - 2 : mx) * px, My = oy + my * px;
+      const Mx = ox + (opts.flip ? w - mx - 2 : mx) * px + SH(my), My = oy + my * px;
       ctx.fillStyle = opts.faceInk || ink;
       if (opts.mouth === 'open') {
         ctx.fillRect(Mx, My, 2 * px, px * 0.8);
         ctx.fillRect(Mx + px * 0.25, My + px * 0.8, px * 1.5, px * 0.8);
         ctx.fillStyle = '#ef8aa0';
         ctx.fillRect(Mx + px * 0.5, My + px * 1.1, px, px * 0.5);
+      } else if (opts.mouth === 'mlem') {
+        // tiny tongue poking out, nothing else
+        ctx.fillStyle = '#ef8aa0';
+        ctx.fillRect(Mx + px * 0.25, My, px, px * 1.35);
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(Mx + px * 0.25, My + px, px, px * 0.35);
       } else if (opts.mouth === 'w') {
         ctx.fillRect(Mx - px, My + px * 0.2, px, px * 0.5);
         ctx.fillRect(Mx, My + px * 0.55, 2 * px, px * 0.5);
@@ -504,8 +541,8 @@
     // blush
     if (opts.blush && eyes.l && eyes.r) {
       ctx.fillStyle = 'rgba(244,114,140,0.8)';
-      ctx.fillRect(ox + (eyes.l[0] - 1) * px, oy + (eyes.l[1] + size + 0.4) * px, 2.5 * px, px);
-      ctx.fillRect(ox + (eyes.r[0] + size - 1.5) * px, oy + (eyes.r[1] + size + 0.4) * px, 2.5 * px, px);
+      ctx.fillRect(ox + (eyes.l[0] - 1) * px + SH(eyes.l[1] + size), oy + (eyes.l[1] + size + 0.4) * px, 2.5 * px, px);
+      ctx.fillRect(ox + (eyes.r[0] + size - 1.5) * px + SH(eyes.r[1] + size), oy + (eyes.r[1] + size + 0.4) * px, 2.5 * px, px);
     }
 
     ctx.restore();
@@ -654,16 +691,95 @@
       rows,
     };
   }
-  {
-    const flickHead = KHEAD.slice();
-    flickHead[0] = '..................RR....';
-    flickHead[1] = '...LLL...........RRRR...';
-    flickHead[2] = '...LiiLL.........RiiR...';
-    KFRAMES.sit_flick = {
-      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-      rows: merge([...flickHead, ...KSIT_BODY], KTAIL_REST),
-    };
-  }
+  // folded-ear rows shared by the idle ear-flick and the sleep dream-twitch
+  const KFLICK_EARS = [
+    '..................RR....',
+    '...LLL...........RRRR...',
+    '...LiiLL.........RiiR...',
+  ];
+  KFRAMES.sit_flick = {
+    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+    rows: merge([...KFLICK_EARS, ...KSIT.slice(3)], KTAIL_REST),
+  };
+  KFRAMES.loaf_twitch = {
+    w: 24, h: 17, eyes: KEYES, mouth: KMOUTH,
+    rows: [...KFLICK_EARS, ...KFRAMES.loaf.rows.slice(3)],
+  };
+
+  // grooming: right front paw lifts off the ground (P = shaded raised paw) —
+  // groom1 licks it at the mouth, groom2 wipes it over the ear
+  const KGROOM_BASE = overlay(KSIT, [
+    [16, '..BBFFFBCCCCCCCCBBBBBB..'],
+    [17, '...FFFF.................'],
+  ]);
+  KFRAMES.sit_groom1 = {
+    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+    rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
+      [8,  '.............ww.........'],
+      [9,  '............wPPw........'],
+      [10, '............wPPPw.......'],
+      [11, '............wPPP........'],
+      [12, '.............wPP........'],
+      [13, '.............wPP........'],
+      [14, '.............wPP........'],
+      [15, '.............wPP........'],
+    ])), KTAIL_REST),
+  };
+  KFRAMES.sit_groom2 = {
+    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+    rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
+      [2,  '.................PP.....'],
+      [3,  '................wPPP....'],
+      [4,  '.................wPP....'],
+      [5,  '..................wPP...'],
+      [6,  '..................wPP...'],
+      [7,  '..................wPP...'],
+      [8,  '..................wPP...'],
+      [9,  '..................wPP...'],
+      [10, '..................wPP...'],
+      [11, '.................wPP....'],
+      [12, '.................wPP....'],
+      [13, '.................wPP....'],
+      [14, '.................wPP....'],
+      [15, '.................wPP....'],
+    ])), KTAIL_REST),
+  };
+
+  // contentment: tail sweeps around the front and rests over the paws
+  const KTAIL_WRAP = overlay(KBLANK, [
+    [11, '....................TT..'],
+    [12, '...................TTT..'],
+    [13, '...................TTT..'],
+    [14, '..................TTTT..'],
+    [15, '..............TTTTTT....'],
+    [16, '...........TTTTTT.......'],
+    [17, '.........TTTtt..........'],
+  ]);
+  KFRAMES.sit_wrap = {
+    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+    rows: merge(KSIT, KTAIL_WRAP),
+  };
+
+  // pounce wind-up: hunkered low (two body rows shorter), tail mid-air;
+  // the renderer adds the butt-wiggle oscillation
+  const KCROUCH_TAIL = overlay(Array(16).fill('.'.repeat(24)), [
+    [8,  '.....................TT.'],
+    [9,  '....................TTTT'],
+    [10, '...................TTTTT'],
+    [11, '...................TTtT.'],
+    [12, '...................TTTT.'],
+    [13, '....................TT..'],
+  ]);
+  KFRAMES.crouch = {
+    w: 24, h: 16, eyes: KEYES, mouth: KMOUTH,
+    rows: merge([
+      ...KHEAD,
+      '..BBBBBBBBBBBBBBBBBBBB..',
+      '..BBBBBCCCCCCCCCCBBBBB..',
+      '..BBFFFBCCCCCCCCBFFFBB..',
+      '...FFFF..........FFFF...',
+    ], KCROUCH_TAIL),
+  };
 
   // side-view action frames shared with classic (they read well at speed)
   KFRAMES.run_a = FRAMES.run_a;

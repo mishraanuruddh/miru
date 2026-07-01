@@ -49,6 +49,9 @@ async function runScenarios(ctx) {
     return file;
   };
 
+  // pull a scheduled ritual forward (grooming, dreams, bleps, tilts, wraps)
+  const poke = (what) => catWin.webContents.executeJavaScript(`window.__catPoke(${JSON.stringify(what)})`);
+
   const scenario = async (name, fn) => {
     try {
       await fn();
@@ -298,6 +301,8 @@ async function runScenarios(ctx) {
     }, 'boop registered', 2500);
     // booping earns a slow affection blink back (latched timestamp avoids races)
     await waitFor(async () => (await debug()).sinceSlowBlinkMs < 900, 'slow blink after boop', 1500);
+    // ...then a tiny mlem as the eyes reopen (window: 250-1100ms post-boop)
+    await waitFor(async () => (await debug()).mouthStyle === 'mlem', 'post-boop mlem', 1400);
     await wait(120);
     await cap('boop');
   });
@@ -322,6 +327,14 @@ async function runScenarios(ctx) {
     setTick({ huntPhase: 'chase' });
     await waitFor(async () => (await debug()).mode === 'hunt', 'hunt mode');
     await cap('hunt-run');
+    // stalk: crouch + butt wiggle before the leap
+    send('hunt', { phase: 'crouch', dir: 1 });
+    setTick({ huntPhase: 'crouch' });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.mode === 'pounce' && x.frame === 'crouch' ? x : null;
+    }, 'pounce wind-up');
+    await cap('pounce-wiggle');
     send('hunt', { phase: 'leap', dir: 1 });
     setTick({ huntPhase: 'leap' });
     await waitFor(async () => (await debug()).mode === 'leap', 'leap mode');
@@ -822,9 +835,15 @@ async function runScenarios(ctx) {
     await post('/hook/claude/ask-done', { session_id: 's1' });
     await post('/hook/claude/end', { session_id: 's1' });
     await post('/hook/claude/end', { session_id: 's2-no-tty' });
-    // drowsy half-lidded eyes just before the nap
+    // defuse the ritual landmine: earlier bond-roll scenarios leave "today"
+    // un-greeted, and the morning greeting would otherwise fire mid-nap or
+    // on wake and swallow the yawn
+    await post('/test/bond-roll', { day: '2099-01-08', activeYesterday: true, greeted: true });
+    await waitFor(async () => !(await debug()).bubble, 'no pending bubble', 8000);
+    // drowsy half-lidded eyes just before the nap — tucked into a loaf
     setTick({ idleSec: 235, vel: 0 });
     await waitFor(async () => (await debug()).eyeStyle === 'squint', 'drowsy eyes before sleep', 4000);
+    await waitFor(async () => (await debug()).frame === 'loaf', 'pre-sleep loaf tuck', 2500);
     await cap('drowsy');
     setTick({ idleSec: 400, vel: 0 });
     const d = await waitFor(async () => {
@@ -833,6 +852,14 @@ async function runScenarios(ctx) {
     }, 'sleep mode', 9000);
     await wait(1800); // collect some Zzz
     await cap('sleep');
+    // dreams: an ear twitch on the sleeping loaf, fish bubble on first dream
+    await poke('dream');
+    const dt = await waitFor(async () => {
+      const x = await debug();
+      return x.dreamTwitching && x.frame === 'loaf_twitch' ? x : null;
+    }, 'dream twitch', 3000);
+    assert((dt.effects || []).includes('dream'), 'first dream should carry the fish bubble');
+    await cap('dream-twitch');
     setTick({ idleSec: 0, vel: 200 });
     await waitFor(async () => (await debug()).mode === 'idle', 'awake');
     // waking yawns: scrunched eyes + open mouth
@@ -847,6 +874,60 @@ async function runScenarios(ctx) {
     await waitFor(async () => (await debug()).frame === 'sit_flick', 'ear flick frame appears', 20000);
     await cap('ear-flick');
     // (dilation is a render-only detail; covered visually via the boop/pet shots)
+  });
+
+  await scenario('rituals: grooming — paw lick, ear wipe, happy eyes', async () => {
+    setTick({ idleSec: 5, vel: 0, cursor: { x: 20, y: 20 } });
+    await waitFor(async () => (await debug()).mode === 'idle', 'idle');
+    await poke('groom');
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.grooming && /^sit_groom/.test(x.frame || '') ? x : null;
+    }, 'grooming starts', 3000);
+    assert(d.eyeStyle === 'happy' || d.eyeStyle === 'closed', 'groom eyes: ' + d.eyeStyle);
+    await cap('groom-lick');
+    // both halves of the loop appear (lick <-> wipe alternates ~430ms)
+    const first = d.frame;
+    await waitFor(async () => {
+      const x = await debug();
+      return x.grooming && x.frame !== first && /^sit_groom/.test(x.frame || '') ? x : null;
+    }, 'groom alternates', 2000);
+    await cap('groom-wipe');
+    await waitFor(async () => !(await debug()).grooming, 'grooming ends', 4000);
+  });
+
+  await scenario('rituals: tail wraps around the paws when content', async () => {
+    setTick({ idleSec: 6, vel: 0, cursor: { x: 20, y: 20 } });
+    await waitFor(async () => (await debug()).mode === 'idle', 'idle');
+    await poke('wrap');
+    await waitFor(async () => (await debug()).frame === 'sit_wrap', 'tail wrap frame', 3000);
+    await cap('tail-wrap');
+  });
+
+  await scenario('reactions: curious head tilt when the cursor lingers', async () => {
+    const b = (await debug()).catBBox;
+    setTick({ idleSec: 3, vel: 0, cursor: { x: Math.round(b.x + b.w * 0.72), y: Math.round(b.y + b.h * 0.5) } });
+    await wait(150); // let a tick land the cursor on the cat
+    await poke('tilt');
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.tilting ? x : null;
+    }, 'head tilt fires', 3000);
+    assert(d.tiltDir === 1, 'should lean toward the cursor side, dir=' + d.tiltDir);
+    await cap('head-tilt');
+    await waitFor(async () => !(await debug()).tilting, 'tilt relaxes', 4000);
+    setTick({ cursor: { x: 20, y: 20 } });
+  });
+
+  await scenario('reactions: the rare idle blep', async () => {
+    setTick({ idleSec: 4, vel: 0, cursor: { x: 20, y: 20 } });
+    await waitFor(async () => (await debug()).mode === 'idle', 'idle');
+    await poke('blep');
+    await waitFor(async () => {
+      const x = await debug();
+      return x.blep && x.mouthStyle === 'mlem' ? x : null;
+    }, 'blep tongue out', 3000);
+    await cap('blep');
   });
 
   await scenario('sprite styles: kawaii default, classic backup switches', async () => {

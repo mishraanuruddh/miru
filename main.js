@@ -209,16 +209,17 @@ function pollLoop() {
     const dist = Math.hypot(cur.x - catCenter().x, cur.y - catCenter().y);
     if (vel > 1500 && dist > 200) fastStreak += dt; else fastStreak = Math.max(0, fastStreak - dt * 2);
     if (fastStreak > 0.4 && now > hunt.cooldownUntil) { fastStreak = 0; startHunt(); }
-  } else if (hunt.phase === 'chase' || hunt.phase === 'leap') {
+  } else if (hunt.phase === 'chase' || hunt.phase === 'crouch' || hunt.phase === 'leap') {
     hunt.t += dt;
     const c = catCenter();
     const dist = Math.hypot(cur.x - c.x, cur.y - c.y);
     hunt.dir = cur.x >= c.x ? 1 : -1;
     if (vel < 80) hunt.slowFor += dt; else hunt.slowFor = 0;
 
+    // during the crouch she holds still — the wiggle is all renderer
     const speed = hunt.phase === 'leap' ? 980 : 640;
     const step = Math.min(speed * dt, dist);
-    if (dist > 1) {
+    if (hunt.phase !== 'crouch' && dist > 1) {
       const nx = c.x + ((cur.x - c.x) / dist) * step;
       const ny = c.y + ((cur.y - c.y) / dist) * step;
       const p = clampToWorkArea(nx - WIN_W / 2, ny - (WIN_H - 70));
@@ -226,8 +227,12 @@ function pollLoop() {
     }
     send('hunt', { phase: hunt.phase, dir: hunt.dir });
 
-    if (hunt.phase === 'chase' && dist < 85) { hunt.phase = 'leap'; hunt.leapT = 0; }
-    else if (hunt.phase === 'leap') {
+    if (hunt.phase === 'chase' && dist < 85) { hunt.phase = 'crouch'; hunt.crouchT = 0; }
+    else if (hunt.phase === 'crouch') {
+      hunt.crouchT += dt;
+      if (dist > 190) hunt.phase = 'chase'; // prey bolted — back to the chase
+      else if (hunt.crouchT > 0.65) { hunt.phase = 'leap'; hunt.leapT = 0; }
+    } else if (hunt.phase === 'leap') {
       hunt.leapT = (hunt.leapT || 0) + dt;
       if (dist < 14 || hunt.leapT > 0.6) endHunt(true);
     }
@@ -573,6 +578,14 @@ function startAgentServer() {
           if (data.activeYesterday) { b.today.todosDone = 1; store.set({ bond: b }); }
           testDayOverride = String(data.day);
           bondDailyRoll(testDayOverride, { forceGift: data.forceGift });
+          if (data.greeted) {
+            // mark the rolled day as already greeted (and drop the queued
+            // gift) so no morning ritual fires into later scenarios
+            const b3 = bond();
+            b3.greetedDay = testDayOverride;
+            b3.pendingGift = null;
+            store.set({ bond: b3 });
+          }
           return done(200, { ok: true, bond: { ...bond(), level: bondLevel(bond().xp) } });
         }
         if (p.startsWith('/hook/claude/')) {
