@@ -1,7 +1,7 @@
 'use strict';
 const {
   app, BrowserWindow, Tray, Menu, screen, ipcMain, shell,
-  systemPreferences, nativeImage, globalShortcut,
+  systemPreferences, nativeImage, globalShortcut, Notification,
 } = require('electron');
 const path = require('path');
 const http = require('http');
@@ -1179,8 +1179,25 @@ function updateTray() {
 
 function toggleCat() {
   if (!catWin || catWin.isDestroyed()) { createCatWindow(); updateTray(); return; }
-  if (catWin.isVisible()) catWin.hide(); else catWin.show();
+  if (catWin.isVisible()) { catWin.hide(); notifyHidden(); } else catWin.show();
   updateTray();
+}
+
+function notifyHidden() {
+  if (TEST || HARNESS || !Notification.isSupported()) return;
+  const s = store.get();
+  const name = s.catName || 'Your cat';
+  try {
+    new Notification({
+      title: `${name} is hiding`,
+      body: s.launcher.hotkey
+        ? 'Press ⌃⌥C to bring the cat back — or click the cat icon in the menu bar and choose Show Cat.'
+        : 'Click the cat icon in the menu bar and choose Show Cat to bring the cat back.',
+      silent: true,
+    }).show();
+  } catch (e) {
+    console.error('[notify]', e.message);
+  }
 }
 
 function resetPosition() {
