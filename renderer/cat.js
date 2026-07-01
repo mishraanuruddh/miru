@@ -96,6 +96,16 @@
     tailT: 0,
     effects: [],
     boopT: -1e9,
+    groomUntil: -1e9,
+    nextGroomT: now() + 30000 + Math.random() * 45000,
+    blepUntil: -1e9,
+    nextBlepT: now() + 120000 + Math.random() * 240000,
+    dreamTwitchUntil: -1e9,
+    nextDreamT: 0,
+    tiltUntil: -1e9,
+    tiltDir: 1,
+    nextTiltT: 0,
+    hoverStartT: 0,
     catBBox: { x: 0, y: 0, w: 0, h: 0 },
     chipBBox: null,
     interactive: false,
@@ -432,6 +442,7 @@
     const t = now();
     if (st.drag.active) return 'drag';
     if (st.hunt.phase === 'chase') return 'hunt';
+    if (st.hunt.phase === 'crouch') return 'pounce';
     if (st.hunt.phase === 'leap') return 'leap';
     if (st.hunt.phase === 'caught') return 'caught';
     if (st.menu.open) return 'menu'; // summoning the menu wins over festivities
@@ -491,7 +502,7 @@
         st.yawnUntil = t + 850; // a big yawn on waking
       }
       if (m === 'idle') st.idleEnterMode = prev;
-      if (m === 'sleep') st.sleepingSince = t;
+      if (m === 'sleep') { st.sleepingSince = t; st.dreamN = 0; }
     } else {
       st.modeT += dt;
     }
@@ -531,6 +542,43 @@
     if (st.mode === 'idle' && t > st.nextEarFlickT) {
       st.earFlickUntil = t + 240;
       st.nextEarFlickT = t + 7000 + Math.random() * 9000;
+    }
+    // grooming ritual: idle cats keep themselves clean
+    if (st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
+      st.groomUntil = t + 2800;
+      st.nextGroomT = t + 45000 + Math.random() * 75000;
+    }
+    if (st.mode !== 'idle') st.groomUntil = Math.min(st.groomUntil, t); // interrupted
+    // a very rare blep: the tongue comes out and she forgets about it
+    if (st.mode === 'idle' && t > st.nextBlepT) {
+      st.blepUntil = t + 2600;
+      st.nextBlepT = t + 240000 + Math.random() * 360000;
+    }
+    // curious head tilt: linger the cursor on her and she leans toward it
+    const bb = st.catBBox;
+    const overCat = bb.w > 0 && st.cursor.x >= bb.x && st.cursor.x <= bb.x + bb.w &&
+      st.cursor.y >= bb.y && st.cursor.y <= bb.y + bb.h;
+    if (overCat && (st.mode === 'idle' || st.mode === 'think') && !st.pet.active && !st.drag.active) {
+      if (!st.hoverStartT) st.hoverStartT = t;
+      if (t - st.hoverStartT > 700 && t > st.nextTiltT && t > st.tiltUntil) {
+        st.tiltUntil = t + 1700;
+        st.tiltDir = st.cursor.x < bb.x + bb.w / 2 ? -1 : 1;
+        st.nextTiltT = t + 8000;
+      }
+    } else st.hoverStartT = 0;
+    // dreams: tiny ear twitches (and sometimes a fish) while asleep
+    if (st.mode === 'sleep') {
+      if (st.nextDreamT < st.sleepingSince) st.nextDreamT = t + 4000 + Math.random() * 7000;
+      if (t > st.nextDreamT) {
+        st.dreamTwitchUntil = t + 460;
+        st.nextDreamT = t + 6000 + Math.random() * 12000;
+        st.dreamN = (st.dreamN || 0) + 1;
+        // every nap dreams of fish at least once
+        if (st.dreamN === 1 || Math.random() < 0.45) {
+          const b = st.catBBox;
+          spawn('dream', b.x + b.w * 0.82, b.y - 2, 4, -8, 3.4);
+        }
+      }
     }
 
     // paw menu animation + auto-fade when ignored
@@ -596,17 +644,25 @@
     switch (st.mode) {
       case 'drag': return { f: FRAMES.hang };
       case 'hunt': return { f: Math.floor(t / 90) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: st.hunt.dir < 0 };
+      case 'pounce': return { f: FRAMES.crouch || FRAMES.sit, flip: st.hunt.dir < 0 };
       case 'leap': return { f: FRAMES.leap, flip: st.hunt.dir < 0 };
       case 'caught': return { f: FRAMES.knead_l };
       case 'celebrate': return { f: FRAMES.celebrate };
       case 'stretch': return { f: FRAMES.stretch_up };
-      case 'sleep': return { f: FRAMES.loaf };
+      case 'sleep': return { f: t < st.dreamTwitchUntil && FRAMES.loaf_twitch ? FRAMES.loaf_twitch : FRAMES.loaf };
       case 'overheat':
       case 'knead': return { f: Math.floor(t / 320) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
       case 'zoomies': return { f: Math.floor(t / 80) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: Math.floor(t / 700) % 2 === 0 };
       case 'scroll': return { f: Math.floor(t / 380) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
       default: {
+        if (t < st.groomUntil && FRAMES.sit_groom1) {
+          return { f: Math.floor(t / 430) % 2 ? FRAMES.sit_groom2 : FRAMES.sit_groom1 };
+        }
         if (t < st.earFlickUntil && FRAMES.sit_flick) return { f: FRAMES.sit_flick };
+        // nodding off: tuck into a loaf before sleep proper
+        if (settings.reactions.sleep && st.idleSec > 232) return { f: FRAMES.loaf };
+        // long calm idle: the tail wraps around the front paws, content
+        if (st.modeT > 25 && FRAMES.sit_wrap) return { f: FRAMES.sit_wrap };
         const tails = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
         return { f: tails[st.tailIdx] };
       }
@@ -619,6 +675,7 @@
     if (t < st.yawnUntil) return 'squint';     // scrunched mid-yawn
     if (t < st.slowBlinkUntil) return 'closed'; // affection cat-kiss
     if (t < st.blinkUntil) return 'closed';
+    if (t < st.groomUntil && st.mode === 'idle') return 'happy'; // grooming bliss
     if (st.mode === 'pet' || st.mode === 'caught') return 'happy';
     if (st.mode === 'celebrate') return st.modeT > 0.5 ? 'happy' : 'open';
     if (st.mode === 'overheat' && st.heat > 0.85) return 'squint';
@@ -657,8 +714,12 @@
   // Kawaii resting face is mouthless (Hello Kitty rule) \u2014 the nose carries
   // it. A mouth appears only when it means something.
   function mouthStyle() {
-    if (now() < st.yawnUntil) return 'open'; // wide yawn
+    const t = now();
+    if (t < st.yawnUntil) return 'open'; // wide yawn
     if (st.mode === 'celebrate' || (st.mode === 'overheat' && st.heat > 0.8)) return 'open';
+    const sinceBoop = t - st.boopT;
+    if (sinceBoop > 250 && sinceBoop < 1100) return 'mlem'; // boop \u2192 mlem
+    if (t < st.blepUntil) return 'mlem';                    // the forgotten blep
     return 'none';
   }
 
@@ -724,16 +785,21 @@
     const baseY = H - 12 - hop;
     const cx = W / 2;
 
+    // pounce wind-up: the butt wiggle before the leap
+    let wiggleX = 0;
+    if (st.mode === 'pounce') wiggleX = Math.round(Math.sin(t * 0.044) * px * 0.5);
+
     ctx.save();
-    ctx.translate(cx, baseY);
+    ctx.translate(cx + wiggleX, baseY);
     if (d.shear) ctx.transform(1, 0, d.shear, 1, 0, 0);
     ctx.scale(sx * anim, sy * anim);
 
     const ox = -(frame.w * px) / 2;
     const oy = -(frame.h * px);
     const gaze = computeGaze();
-    // pupils dilate with interest: when the cursor is near, or while adored
-    let dilate = st.mode === 'pet' || sinceBoop < 900;
+    // pupils dilate with interest: when the cursor is near, while adored,
+    // or locked onto prey mid-pounce
+    let dilate = st.mode === 'pet' || st.mode === 'pounce' || sinceBoop < 900;
     if (!dilate && settings.reactions.eyeFollow && st.catBBox.w) {
       const b = st.catBBox;
       const near = Math.hypot(st.cursor.x - (b.x + b.w / 2), st.cursor.y - (b.y + b.h / 2)) < b.w * 0.85;
@@ -745,6 +811,8 @@
       mouth: mouthStyle(),
       blush: st.mode === 'pet' || sinceBoop < 900,
       faceInk: faceInk(),
+      freckles: settings.spriteStyle !== 'classic',
+      tilt: t < st.tiltUntil ? st.tiltDir : 0,
       style: settings.skinStyle || 'plain',
       overrides: settings.pixelOverrides || null,
     });
@@ -765,6 +833,12 @@
 
     // wake surprise
     if (t < st.wakeUntil) drawMark('!', cx + st.catBBox.w / 2 + 6, st.catBBox.y - 14, '#ffd400');
+
+    // curious "?" beside the head tilt, on the side she leans toward
+    if (t < st.tiltUntil) {
+      const qx = st.tiltDir > 0 ? cx + st.catBBox.w / 2 + 8 : cx - st.catBBox.w / 2 - 18;
+      drawMark('?', qx, st.catBBox.y - 14, '#9fb4d8');
+    }
 
     // alert mark
     if (st.mode === 'alert' && Math.floor(t / 350) % 2) {
@@ -900,6 +974,19 @@
         ctx.fillStyle = '#ffd400';
         ctx.fillRect(p.x - 1, p.y - 4, 2, 10);
         ctx.fillRect(p.x - 4, p.y - 1, 10, 2);
+      } else if (p.type === 'dream') {
+        // a thought bubble with a little fish inside
+        ctx.fillStyle = 'rgba(20,19,26,0.9)';
+        ctx.fillRect(p.x - 9, p.y - 7, 18, 14);
+        ctx.fillStyle = '#fffef8';
+        ctx.fillRect(p.x - 8, p.y - 6, 16, 12);
+        ctx.fillRect(p.x - 11, p.y + 8, 3, 3); // trailing dot
+        ctx.fillStyle = '#7fa8d8';
+        ctx.fillRect(p.x - 4, p.y - 2, 6, 4);  // fish body
+        ctx.fillRect(p.x + 2, p.y - 3, 2, 3);  // tail fin up
+        ctx.fillRect(p.x + 2, p.y + 1, 2, 3);  // tail fin down
+        ctx.fillStyle = '#14131a';
+        ctx.fillRect(p.x - 3, p.y - 1, 2, 2);  // eye
       }
       ctx.globalAlpha = 1;
     }
@@ -1400,6 +1487,17 @@
   loop();
 
   // state snapshot for the automated test harness
+  // test hook: pull a scheduled ritual forward so scenarios don't wait minutes
+  window.__catPoke = (what) => {
+    const t = now();
+    if (what === 'groom') st.nextGroomT = t - 1;
+    else if (what === 'blep') st.nextBlepT = t - 1;
+    else if (what === 'dream') st.nextDreamT = t - 1;
+    else if (what === 'tilt') { st.nextTiltT = t - 1; st.hoverStartT = t - 800; }
+    else if (what === 'wrap') st.modeT = 26; // long-calm-idle shortcut
+    return what;
+  };
+
   window.__catDebug = () => ({
     ready: true,
     mode: st.mode,
@@ -1418,7 +1516,13 @@
     gaze: computeGaze(),
     eyeStyle: eyeStyle(),
     mouthStyle: mouthStyle(),
-    frame: pickFrame().f === FRAMES.sit_flick ? 'sit_flick' : null,
+    frame: (() => { const f = pickFrame().f; for (const k in FRAMES) if (FRAMES[k] === f) return k; return null; })(),
+    grooming: now() < st.groomUntil,
+    tilting: now() < st.tiltUntil,
+    tiltDir: st.tiltDir,
+    dreamTwitching: now() < st.dreamTwitchUntil,
+    blep: now() < st.blepUntil,
+    effects: st.effects.map((p) => p.type),
     yawning: now() < st.yawnUntil,
     slowBlinking: now() < st.slowBlinkUntil,
     sinceSlowBlinkMs: Math.round(now() - st.slowBlinkAt),

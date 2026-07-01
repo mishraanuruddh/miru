@@ -53,12 +53,16 @@ const PX = 6, PAD = 14, CELL_W = 32 * PX, CELL_H = 30 * PX;
 // optional: pick eye style per frame for a livelier sheet
 const EYE_BY_FRAME = {
   loaf: { style: 'closed' },
+  loaf_twitch: { style: 'closed' },
+  sit_groom1: { style: 'happy' },
+  sit_groom2: { style: 'happy' },
+  crouch: { style: 'open', gx: 1, gy: 1, dilate: true },
   celebrate: { style: 'happy' },
   knead_l: { style: 'open', gx: 1, gy: 2 },
   knead_r: { style: 'open', gx: 1, gy: 2 },
 };
 const MOUTH_BY_FRAME = { celebrate: 'open' };
-const DEFAULT_MOUTH = 'w';
+const DEFAULT_MOUTH = 'none';
 
 const sheetW = PAD + frameIds.length * (CELL_W + PAD);
 const sheetH = PAD + skinIds.length * (CELL_H + PAD);
@@ -76,6 +80,7 @@ skinIds.forEach((sid, row) => {
       eye: EYE_BY_FRAME[fid] || { style: 'open', gx: 1, gy: 1 },
       mouth: MOUTH_BY_FRAME[fid] || DEFAULT_MOUTH,
       style: process.argv[3] || 'plain',
+      freckles: true,
     });
   });
 });
