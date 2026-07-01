@@ -453,7 +453,8 @@
   function update(dt) {
     const t = now();
 
-    // overheat accumulation
+    // overheat accumulation — heat drives steam + panting only; it must
+    // never tint the fur (drawCat takes no heat)
     if (settings.reactions.overheat && t - st.lastKeyT < 800 && st.kps > 5.5) {
       st.heat = Math.min(1, st.heat + dt * 0.22 * (st.kps / 8));
     } else {
@@ -739,7 +740,6 @@
     }
     drawCat(ctx, frame, skin, px, ox, oy, {
       flip,
-      heat: st.heat > 0.35 ? st.heat : 0,
       eye: { style: eyeStyle(), gx: gaze.gx, gy: gaze.gy, dilate },
       mouth: mouthStyle(),
       blush: st.mode === 'pet' || sinceBoop < 900,

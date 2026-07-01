@@ -364,12 +364,6 @@
     return pts;
   }
 
-  function heatColor(color, heat) {
-    if (!heat) return color;
-    const [r, g, b] = hexToRgb(color);
-    return `rgb(${Math.round(r + (236 - r) * heat)},${Math.round(g + (84 - g) * heat * 0.9)},${Math.round(b + (66 - b) * heat * 0.9)})`;
-  }
-
   function lum(hex) {
     const [r, g, b] = hexToRgb(String(hex));
     return 0.299 * r + 0.587 * g + 0.114 * b;
@@ -385,8 +379,9 @@
     return Math.abs(lum(skin.pupil) - lum(skin.headL)) > 50 ? skin.pupil : skin.iris;
   }
 
-  // Draw the full cat. opts:
-  //   flip, heat (0..1), alpha,
+  // Draw the full cat. Fur is always the skin's true colors — overheat is
+  // conveyed by steam/panting in the renderer, never by tinting pixels. opts:
+  //   flip, alpha,
   //   eye: {style: 'open'|'closed'|'happy'|'squint', gx:0..2, gy:0..2}
   //   mouth: 'none'|'smile'|'open'|'w', blush: bool
   function drawCat(ctx, frame, skin, px, ox, oy, opts = {}) {
@@ -395,7 +390,7 @@
     ctx.save();
     if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
 
-    // outline (skip during heavy heat tint? keep — looks fine)
+    // outline
     ctx.fillStyle = skin.outline || CREAM;
     for (const [x, y] of getOutline(frame)) {
       ctx.fillRect(X(x), oy + y * px, px, px);
@@ -417,7 +412,7 @@
           if (style === 'tabby' && (x + y * 2) % 6 < 2) color = patternColor;
           else if (style === 'spots' && (((x >> 1) * 37 + (y >> 1) * 53) % 23) < 4) color = patternColor;
         }
-        ctx.fillStyle = heatColor(color, opts.heat || 0);
+        ctx.fillStyle = color;
         ctx.fillRect(X(x), oy + y * px, px, px);
       }
     }
@@ -430,7 +425,7 @@
         if (!(py2 >= 0 && py2 < rows.length)) continue;
         const ch = rows[py2][px2];
         if (!ch || ch === '.' || ch === 'w') continue;
-        ctx.fillStyle = heatColor(opts.overrides[key], opts.heat || 0);
+        ctx.fillStyle = opts.overrides[key];
         ctx.fillRect(X(px2), oy + py2 * px, px, px);
       }
     }
