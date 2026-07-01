@@ -654,11 +654,12 @@
     return Math.abs(lum(skin.pupil) - lum(skin.headL)) > 50 ? skin.pupil : skin.iris;
   }
 
+  // Kawaii resting face is mouthless (Hello Kitty rule) \u2014 the nose carries
+  // it. A mouth appears only when it means something.
   function mouthStyle() {
     if (now() < st.yawnUntil) return 'open'; // wide yawn
     if (st.mode === 'celebrate' || (st.mode === 'overheat' && st.heat > 0.8)) return 'open';
-    if (st.mode === 'pet' || st.mode === 'caught' || now() - st.boopT < 900) return 'w';
-    return 'w'; // resting cat face: the little \u03c9
+    return 'none';
   }
 
   function render() {
