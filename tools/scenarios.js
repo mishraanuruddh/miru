@@ -104,7 +104,7 @@ async function runScenarios(ctx) {
     }, 'idle after typing stops', 6000);
   });
 
-  await scenario('overheat: fast typing turns the cat red + steam', async () => {
+  await scenario('overheat: fast typing steams the cat, fur never turns red', async () => {
     const t0 = Date.now();
     let d = null;
     while (Date.now() - t0 < 8000) {
@@ -118,6 +118,21 @@ async function runScenarios(ctx) {
     d = await debug();
     assert(d.heat > 0.6 && d.mode === 'overheat', `heat=${d.heat} mode=${d.mode}`);
     await cap('overheat');
+    // at peak heat, no pixel may sit in the red-tint zone the old heatColor
+    // used (fur must keep its true colors; pinks like nose/blush have g or
+    // b above 130 and stay out of this zone)
+    const redPixels = await catWin.webContents.executeJavaScript(`
+      (() => {
+        const cv = document.getElementById('cat');
+        const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        let n = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          if (d[i + 3] > 200 && d[i] > 190 && d[i + 1] < 130 && d[i + 2] < 130) n++;
+        }
+        return n;
+      })()
+    `);
+    assert(redPixels === 0, `fur tinted red: ${redPixels} deep-red pixels at peak heat`);
     await waitFor(async () => (await debug()).heat < 0.35, 'cooldown', 12000, 200);
   });
 
