@@ -506,6 +506,64 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   $('murmurPath').value = settings.launcher.murmurApp || '';
   $('murmurPath').addEventListener('input', () => save({ launcher: { murmurApp: $('murmurPath').value } }));
 
+  // ------------------------------------------------------------------ voice
+  const v = settings.voice || {};
+  $('voiceEnabled').checked = v.enabled !== false;
+  $('voiceEnabled').addEventListener('change', () => save({ voice: { enabled: $('voiceEnabled').checked } }));
+  $('voiceHotkey').checked = v.hotkey !== false;
+  $('voiceHotkey').addEventListener('change', () => save({ voice: { hotkey: $('voiceHotkey').checked } }));
+  $('voiceNotesDir').value = v.notesDir || '~/notes';
+  $('voiceNotesDir').addEventListener('input', () => save({ voice: { notesDir: $('voiceNotesDir').value } }));
+  $('voiceAutoConfirm').value = ((v.autoConfirmMs == null ? 3000 : v.autoConfirmMs) / 1000);
+  $('voiceAutoConfirm').addEventListener('change', () => {
+    const s = Math.max(0, Math.min(10, Number($('voiceAutoConfirm').value) || 0));
+    save({ voice: { autoConfirmMs: Math.round(s * 1000) } });
+  });
+  $('voiceMaxRecord').value = v.maxRecordS || 15;
+  $('voiceMaxRecord').addEventListener('change', () => {
+    const s = Math.max(5, Math.min(30, Number($('voiceMaxRecord').value) || 15));
+    save({ voice: { maxRecordS: s } });
+  });
+  $('voiceAgentCommands').checked = v.agentCommands !== false;
+  $('voiceAgentCommands').addEventListener('change', () => save({ voice: { agentCommands: $('voiceAgentCommands').checked } }));
+  $('voiceAgentEnter').checked = v.agentEnter === true;
+  $('voiceAgentEnter').addEventListener('change', () => save({ voice: { agentEnter: $('voiceAgentEnter').checked } }));
+  $('voiceBrainCap').value = v.dailyBrainCap == null ? 150 : v.dailyBrainCap;
+  $('voiceBrainCap').addEventListener('change', () => {
+    save({ voice: { dailyBrainCap: Math.max(0, Number($('voiceBrainCap').value) || 0) } });
+  });
+  async function refreshVoiceStatus() {
+    try {
+      const s = await pixelpaw.voiceStatus();
+      const a = s.availability || {};
+      $('voiceAvail').textContent =
+        `transcriber: ${a.murmur ? 'murmur ✓' : a.whisper ? 'whisper ✓' : 'MISSING'} · brain: ${a.claude ? 'claude ✓' : 'offline (fallback router)'}`;
+      const u = s.usage || {};
+      $('voiceUsageLine').textContent = `today: ${u.calls || 0} brain calls · $${(u.costUsd || 0).toFixed(2)}`;
+    } catch (e) {
+      $('voiceAvail').textContent = 'status unavailable';
+    }
+  }
+  refreshVoiceStatus();
+
+  // -------------------------------------------------- follow-ups + wind-down
+  const fu = settings.followUp || {};
+  $('fuEnabled').checked = fu.enabled !== false;
+  $('fuEnabled').addEventListener('change', () => save({ followUp: { enabled: $('fuEnabled').checked } }));
+  $('fuMinutes').value = fu.minutes || 30;
+  $('fuMinutes').addEventListener('change', () => {
+    save({ followUp: { minutes: Math.max(5, Math.min(120, Number($('fuMinutes').value) || 30)) } });
+  });
+  const wd = settings.windDown || {};
+  $('wdEnabled').checked = wd.enabled !== false;
+  $('wdEnabled').addEventListener('change', () => save({ windDown: { enabled: $('wdEnabled').checked } }));
+  $('wdTime').value = wd.time || '18:30';
+  $('wdTime').addEventListener('change', () => {
+    let t = $('wdTime').value || '18:30';
+    if (t > '22:30') { t = '22:30'; $('wdTime').value = t; } // window must end by 23:00
+    save({ windDown: { time: t } });
+  });
+
   function renderApps() {
     const list = $('appList');
     list.innerHTML = '';

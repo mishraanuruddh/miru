@@ -70,6 +70,8 @@
     nextZoomiesT: now() + 60000,
     longPressTimer: null,
     question: null, // {qid, agent, header, question, options, canType, status, hover, boxes, openBox, dismissBox, panelBox}
+    confirm: null,  // shared chip panel: {cid, kind, title, text, chips, autoAt, boxes, dismissBox, panelBox}
+    voice: { phase: 'idle', vid: null, recStartT: 0, maxMs: 15000, cancelBox: null },
     doneFlashUntil: -1e9,
     celebrateUntil: -1e9,
     celebrateText: null,
@@ -118,6 +120,7 @@
     st.cursor = t.cursor;
     st.vel = t.vel;
     st.idleSec = t.idleSec;
+    if (t.test) st.testMode = true; // harness run: ambient rituals wait for pokes
     if (t.huntPhase) st.hunt.phase = t.huntPhase;
     updateInteractive(t.cursor.x, t.cursor.y);
   });
@@ -182,6 +185,68 @@
   });
 
   pixelpaw.onAskClear(() => { st.question = null; });
+
+  pixelpaw.onConfirm((c) => {
+    st.confirm = {
+      ...c,
+      autoAt: c.autoConfirmMs ? now() + c.autoConfirmMs : null,
+      autoTotalMs: c.autoConfirmMs || 0,
+      autoFired: false,
+      hover: -1, boxes: [], dismissBox: null, panelBox: null,
+    };
+    st.bubble = null;
+    CatAudio.pop();
+  });
+  pixelpaw.onConfirmClear(({ cid }) => {
+    if (st.confirm && st.confirm.cid === cid) st.confirm = null;
+  });
+
+  pixelpaw.onVoiceState((v) => {
+    st.voice.phase = v.phase;
+    if (v.vid) st.voice.vid = v.vid;
+    if (v.maxMs) st.voice.maxMs = v.maxMs;
+    if (v.phase === 'listening') st.voice.recStartT = now();
+    if (v.phase === 'idle') st.voice.cancelBox = null;
+  });
+
+  pixelpaw.onVoiceCapture(async (c) => {
+    if (c.cmd === 'start') {
+      if (st.menu.open) closeMenu();
+      st.voice.vid = c.vid;
+      st.voice.maxMs = c.maxMs || 15000;
+      try {
+        await VoiceCapture.start({
+          maxMs: c.maxMs,
+          silenceMs: c.silenceMs,
+          onAutoStop: () => finishCapture(c.vid),
+        });
+        pixelpaw.voiceCaptureState({ vid: c.vid, ok: true });
+      } catch (e) {
+        pixelpaw.voiceCaptureState({ vid: c.vid, ok: false, error: e.name || e.message });
+      }
+    } else if (c.cmd === 'stop') {
+      finishCapture(c.vid);
+    } else if (c.cmd === 'cancel') {
+      VoiceCapture.cancel();
+    }
+  });
+
+  let finishingCapture = false;
+  function finishCapture(vid) {
+    if (!VoiceCapture.active() || finishingCapture) return;
+    finishingCapture = true;
+    try {
+      const r = VoiceCapture.stop();
+      pixelpaw.voiceAudio(vid, r.wav, { durationS: r.durationS, speechSeen: r.speechSeen });
+    } finally {
+      finishingCapture = false;
+    }
+  }
+  pixelpaw.onVoiceDone(({ message, undoToken, undoMs }) => {
+    showBubble(String(message || 'DONE'), undoMs || 5000, undoToken ? 'undo' : 'say');
+    if (undoToken && st.bubble) st.bubble.undoToken = undoToken;
+    st.hopUntil = now() + 700;
+  });
 
   pixelpaw.onInbox((items) => {
     st.inbox = items || [];
@@ -293,6 +358,8 @@
     if (inBox(x, y, st.ledBox)) return true;
     if (st.bubble && inBox(x, y, st.bubbleBox)) return true;
     if (st.question && inBox(x, y, st.question.panelBox)) return true;
+    if (st.confirm && inBox(x, y, st.confirm.panelBox)) return true;
+    if (st.voice.phase === 'listening' && inBox(x, y, st.voice.cancelBox)) return true;
     if (st.menu.open && panelEl) {
       const r = panelEl.getBoundingClientRect();
       if (x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 10) return true;
@@ -311,9 +378,12 @@
   window.addEventListener('mousemove', (e) => {
     updateInteractive(e.clientX, e.clientY);
 
-    // question panel hover
+    // question / confirm panel hover
     if (st.question) {
       st.question.hover = st.question.boxes.findIndex((b) => inBox(e.clientX, e.clientY, b));
+    }
+    if (st.confirm) {
+      st.confirm.hover = st.confirm.boxes.findIndex((b) => inBox(e.clientX, e.clientY, b));
     }
     st.ledHover = inBox(e.clientX, e.clientY, st.ledBox);
     if (st.menu.open && e.target && e.target.closest && e.target.closest('.panel')) {
@@ -361,6 +431,22 @@
       return;
     }
 
+    // confirm chips take top priority (they're the freshest ask)
+    const cf = st.confirm;
+    if (cf && inBox(X, Y, cf.panelBox)) {
+      const hit = cf.boxes.find((b) => inBox(X, Y, b));
+      if (hit) {
+        pixelpaw.confirmAction(cf.cid, hit.id);
+        st.confirm = null; // optimistic; main echoes confirm-clear
+        CatAudio.pop();
+      } else if (inBox(X, Y, cf.dismissBox)) {
+        pixelpaw.confirmDismiss(cf.cid, 'click');
+        st.confirm = null;
+        CatAudio.pop();
+      }
+      return;
+    }
+
     // question panel clicks take priority
     const q = st.question;
     if (q && inBox(X, Y, q.panelBox)) {
@@ -386,6 +472,12 @@
       return;
     }
     if (st.bubble && inBox(X, Y, st.bubbleBox)) {
+      if (st.bubble.kind === 'undo' && st.bubble.undoToken) {
+        pixelpaw.voiceUndo(st.bubble.undoToken);
+        st.bubble = null;
+        CatAudio.pop();
+        return;
+      }
       // a message is a doorway to the inbox, not a dead end
       st.bubble = null;
       openMenu('inbox');
@@ -394,6 +486,17 @@
     if (inBox(X, Y, st.chipBBox)) {
       pixelpaw.pomControl('toggle-pause');
       CatAudio.pop();
+      return;
+    }
+    if (st.voice.phase === 'listening') {
+      if (inBox(X, Y, st.voice.cancelBox)) {
+        pixelpaw.voiceCancel(st.voice.vid);
+        VoiceCapture.cancel();
+        CatAudio.pop();
+        return;
+      }
+      // a click on the cat means "done talking"
+      finishCapture(st.voice.vid);
       return;
     }
     if (pointInteractive(X, Y)) {
@@ -446,6 +549,7 @@
     if (st.hunt.phase === 'leap') return 'leap';
     if (st.hunt.phase === 'caught') return 'caught';
     if (st.menu.open) return 'menu'; // summoning the menu wins over festivities
+    if (st.voice.phase !== 'idle') return 'listen'; // talking to the cat
     if (t < st.celebrateUntil) return 'celebrate';
     if (t < st.stretchUntil) return 'stretch';
     if (t < st.alertUntil) return 'alert';
@@ -527,6 +631,18 @@
       d.sy = 1; d.springV = 0; d.shear = 0;
     }
 
+    // confirm auto-countdown: pauses while pondered (hover / menu open),
+    // fires the primary chip once when it runs out
+    const cf = st.confirm;
+    if (cf && cf.autoAt && !cf.autoFired) {
+      const pondering = st.menu.open || (cf.panelBox && inBox(st.cursor.x, st.cursor.y, cf.panelBox));
+      if (pondering) cf.autoAt += dt * 1000;
+      else if (t > cf.autoAt) {
+        cf.autoFired = true;
+        if (cf.chips.some((ch) => ch.id === 'confirm')) pixelpaw.confirmAction(cf.cid, 'confirm');
+      }
+    }
+
     // blink scheduling
     if (t > st.nextBlinkT) {
       st.blinkUntil = t + 130;
@@ -543,14 +659,15 @@
       st.earFlickUntil = t + 240;
       st.nextEarFlickT = t + 7000 + Math.random() * 9000;
     }
-    // grooming ritual: idle cats keep themselves clean
-    if (st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
+    // grooming ritual: idle cats keep themselves clean (harness runs poke
+    // st.groomUntil directly — ambient fires would eat frame-assert windows)
+    if (!st.testMode && st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
       st.groomUntil = t + 2800;
       st.nextGroomT = t + 45000 + Math.random() * 75000;
     }
     if (st.mode !== 'idle') st.groomUntil = Math.min(st.groomUntil, t); // interrupted
     // a very rare blep: the tongue comes out and she forgets about it
-    if (st.mode === 'idle' && t > st.nextBlepT) {
+    if (!st.testMode && st.mode === 'idle' && t > st.nextBlepT) {
       st.blepUntil = t + 2600;
       st.nextBlepT = t + 240000 + Math.random() * 360000;
     }
@@ -643,6 +760,7 @@
     const t = now();
     switch (st.mode) {
       case 'drag': return { f: FRAMES.hang };
+      case 'listen': return { f: FRAMES.sit_tail_up }; // ears-up attentive pose
       case 'hunt': return { f: Math.floor(t / 90) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: st.hunt.dir < 0 };
       case 'pounce': return { f: FRAMES.crouch || FRAMES.sit, flip: st.hunt.dir < 0 };
       case 'leap': return { f: FRAMES.leap, flip: st.hunt.dir < 0 };
@@ -687,6 +805,8 @@
   function computeGaze() {
     // pupil slot 0..2 on each axis inside the 4x4 socket
     if (st.mode === 'think') return { gx: 0, gy: 0 };
+    if (st.mode === 'listen') return { gx: 1, gy: 0 }; // all ears, looking up
+    if (st.confirm) return { gx: 1, gy: 0 }; // looking up at the chip panel
     if (st.mode === 'question' || st.mode === 'menu') return { gx: 1, gy: 0 }; // looking up at the panel
     if (st.mode === 'celebrate') return { gx: 1, gy: 1 };
     if (!settings.reactions.eyeFollow) return { gx: 1, gy: 1 };
@@ -798,8 +918,8 @@
     const oy = -(frame.h * px);
     const gaze = computeGaze();
     // pupils dilate with interest: when the cursor is near, while adored,
-    // or locked onto prey mid-pounce
-    let dilate = st.mode === 'pet' || st.mode === 'pounce' || sinceBoop < 900;
+    // locked onto prey mid-pounce, or listening intently
+    let dilate = st.mode === 'pet' || st.mode === 'pounce' || st.mode === 'listen' || sinceBoop < 900;
     if (!dilate && settings.reactions.eyeFollow && st.catBBox.w) {
       const b = st.catBBox;
       const near = Math.hypot(st.cursor.x - (b.x + b.w / 2), st.cursor.y - (b.y + b.h / 2)) < b.w * 0.85;
@@ -856,9 +976,46 @@
     drawEffects();
     drawChip();
     drawLED();
+    if (st.voice.phase !== 'idle') drawVoiceStatus();
     if (!st.menu.open) drawBubbles();
     // topmost: the "why is this light on" tooltip
     if (st.ledHover && st.ledBox) drawLEDTooltip(st.ledBox.x + 5, st.ledBox.y + 5);
+  }
+
+  // REC pill while listening (right of the head — the LED owns the left);
+  // think-dots while the transcript is being chewed on
+  function drawVoiceStatus() {
+    const t = now();
+    const b = st.catBBox;
+    const x = b.x + b.w + 8, y = b.y + 4;
+    if (st.voice.phase === 'listening') {
+      const recS = Math.floor((t - st.voice.recStartT) / 1000);
+      const remainS = Math.max(0, Math.ceil((st.voice.maxMs - (t - st.voice.recStartT)) / 1000));
+      const blink = Math.floor(t / 400) % 2;
+      ctx.fillStyle = '#14131a';
+      ctx.fillRect(x - 2, y - 2, 10, 10);
+      ctx.globalAlpha = blink ? 1 : 0.35;
+      ctx.fillStyle = '#ff5d52';
+      ctx.fillRect(x, y, 6, 6);
+      ctx.globalAlpha = 1;
+      const ending = remainS <= 5;
+      const label = ending ? '0:0' + remainS : 'REC 0:' + String(Math.min(recS, 59)).padStart(2, '0');
+      PixelFont.draw(ctx, label, x + 12, y, 1.5, ending ? '#ffb83d' : '#fdf8ec');
+      const cxX = x + 12 + PixelFont.measure(label, 1.5) + 8;
+      ctx.fillStyle = '#14131a';
+      ctx.fillRect(cxX - 3, y - 3, 13, 13);
+      PixelFont.draw(ctx, 'X', cxX, y, 1.5, '#fdf8ec');
+      st.voice.cancelBox = { x: cxX - 3, y: y - 3, w: 13, h: 13 };
+    } else if (st.voice.phase === 'transcribing' || st.voice.phase === 'routing') {
+      st.voice.cancelBox = null;
+      const cyc = Math.floor(t / 380) % 4;
+      bubbleRect(x - 4, y - 6, 44, 16);
+      PixelFont.draw(ctx, 'HMM', x, y, 1.5, '#2a2731');
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i < cyc ? '#2a2731' : 'rgba(42,39,49,0.25)';
+        ctx.fillRect(x + 26 + i * 5, y + 4, 3, 3);
+      }
+    }
   }
 
   // subtle agent status LED, floating left of the cat's head; hover explains it
@@ -1022,7 +1179,11 @@
     if (st.bubble && t > st.bubble.until) st.bubble = null;
     if (!st.bubble) st.bubbleBox = null;
 
-    if (st.question) {
+    if (st.confirm) {
+      // freshest ask wins; a pending agent question reappears afterwards
+      const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
+      topY = drawConfirmPanel(sitTop - 6) - 8;
+    } else if (st.question) {
       // stable anchor: the panel must not bounce while the cat hops/celebrates
       const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
       topY = drawQuestionPanel(sitTop - 6) - 8;
@@ -1122,6 +1283,96 @@
 
   function truncate(s, n) {
     return s.length > n ? s.slice(0, n) : s;
+  }
+
+  // shared confirm-chip panel: voice intents, todo follow-ups, wind-down.
+  // Same visual language as the question panel; chips flow left to right.
+  function drawConfirmPanel(bottomY) {
+    const c = st.confirm;
+    const px = 2;
+    const w = Math.min(W - 16, 330);
+    const x = W / 2 - w / 2;
+    const lh = 7 * px;
+    const lines = wrapText(String(c.text || '').toUpperCase(), w - 20, px).slice(0, 3);
+    const chipH = 16;
+
+    // flow chips into rows
+    const rows = [];
+    let row = [], rowW = 0;
+    for (const ch of c.chips) {
+      const cw = Math.max(34, PixelFont.measure(String(ch.label).toUpperCase(), 1.5) + 14);
+      if (rowW + cw + 4 > w - 16 && row.length) { rows.push(row); row = []; rowW = 0; }
+      row.push({ ...ch, w: cw });
+      rowW += cw + 4;
+    }
+    if (row.length) rows.push(row);
+
+    const footH = 14;
+    const h = 16 + lines.length * lh + 4 + rows.length * (chipH + 4) + footH + 6;
+    const y = bottomY - h - 8;
+
+    // frame + tail to the cat
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#fffef8';
+    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(W / 2 - 4, y + h + 2, 8, 4);
+    ctx.fillStyle = '#fffef8';
+    ctx.fillRect(W / 2 - 2, y + h, 4, 4);
+
+    // title strip
+    ctx.fillStyle = '#ffd400';
+    ctx.fillRect(x, y, w, 12);
+    PixelFont.draw(ctx, String(c.title || '').toUpperCase(), x + 6, y + 3, px, '#14131a');
+
+    let cy = y + 16;
+    for (const line of lines) {
+      PixelFont.draw(ctx, line, x + 8, cy, px, '#14131a');
+      cy += lh;
+    }
+    cy += 4;
+
+    c.boxes = [];
+    let bi = 0;
+    for (const r of rows) {
+      let bx = x + 8;
+      for (const ch of r) {
+        const hovered = c.hover === bi;
+        const primary = ch.id === 'confirm' || ch.id === 'done';
+        ctx.fillStyle = '#14131a';
+        ctx.fillRect(bx - 1, cy - 1, ch.w + 2, chipH + 2);
+        ctx.fillStyle = hovered ? '#ffd400' : '#2a2933';
+        ctx.fillRect(bx, cy, ch.w, chipH);
+        PixelFont.draw(ctx, String(ch.label).toUpperCase(), bx + 7, cy + 5, 1.5,
+          hovered ? '#14131a' : primary ? '#ffd400' : '#fdf8ec');
+        if (c.autoAt && ch.id === 'confirm' && !c.autoFired) {
+          // countdown bar drains under the chip that will fire
+          const rem = Math.max(0, c.autoAt - now());
+          ctx.fillStyle = '#ffd400';
+          ctx.fillRect(bx, cy + chipH - 3, ch.w * Math.min(1, rem / c.autoTotalMs), 3);
+        }
+        c.boxes.push({ x: bx, y: cy, w: ch.w, h: chipH, id: ch.id });
+        bx += ch.w + 4;
+        bi++;
+      }
+      cy += chipH + 4;
+    }
+
+    // footer: hint + dismiss
+    const fy = cy;
+    let hint = null;
+    if (c.autoAt && !c.autoFired) hint = 'AUTO IN ' + Math.max(0, Math.ceil((c.autoAt - now()) / 1000)) + 'S';
+    else if (c.kind === 'voice') hint = 'NEEDS A CLICK';
+    if (hint) PixelFont.draw(ctx, hint, x + 8, fy + 3, 1.5, '#8a8794');
+    const bw = PixelFont.measure('DISMISS', 1.5) + 10;
+    ctx.fillStyle = '#14131a';
+    ctx.fillRect(x + w - 6 - bw, fy, bw, 12);
+    PixelFont.draw(ctx, 'DISMISS', x + w - 6 - bw + 5, fy + 3, 1.5, '#fdf8ec');
+    c.dismissBox = { x: x + w - 6 - bw, y: fy, w: bw, h: 12 };
+
+    c.panelBox = { x: x - 2, y: y - 2, w: w + 4, h: h + 6 };
+    return y;
   }
 
   // ------------------------------------------------------------- paw menu
@@ -1235,7 +1486,8 @@
 
     if (st.menu.page === 'root') {
       const appsHint = (settings.launcher.apps || []).map((a) => a.label).join(' · ') || 'none set';
-      panelEl.appendChild(row({ icon: 'mic', label: 'Voice', hint: 'dictate with Murmur', onClick: act({ type: 'voice' }) }));
+      panelEl.appendChild(row({ icon: 'mic', label: 'Talk', hint: 'ask · todo · note · agent', onClick: act({ type: 'talk' }) }));
+      panelEl.appendChild(row({ icon: 'mic', label: 'Dictate', hint: 'type with your voice (Murmur)', onClick: act({ type: 'voice' }) }));
       panelEl.appendChild(row({ icon: 'rocket', label: 'Apps', hint: appsHint.toLowerCase(), onClick: goto('apps') }));
       const dueSoon = open.filter((t) => t.due && t.due - Date.now() < 3600000).length;
       panelEl.appendChild(row({
@@ -1486,12 +1738,12 @@
   }
   loop();
 
-  // state snapshot for the automated test harness
-  // test hook: pull a scheduled ritual forward so scenarios don't wait minutes
+  // test hook: trigger a ritual directly so scenarios don't wait minutes
+  // (ambient groom/blep schedulers are inert under the harness — st.testMode)
   window.__catPoke = (what) => {
     const t = now();
-    if (what === 'groom') st.nextGroomT = t - 1;
-    else if (what === 'blep') st.nextBlepT = t - 1;
+    if (what === 'groom') st.groomUntil = t + 2800;
+    else if (what === 'blep') st.blepUntil = t + 2600;
     else if (what === 'dream') st.nextDreamT = t - 1;
     else if (what === 'tilt') { st.nextTiltT = t - 1; st.hoverStartT = t - 800; }
     else if (what === 'wrap') st.modeT = 26; // long-calm-idle shortcut
@@ -1516,6 +1768,16 @@
     gaze: computeGaze(),
     eyeStyle: eyeStyle(),
     mouthStyle: mouthStyle(),
+    voicePhase: st.voice.phase,
+    bubbleKind: st.bubble ? st.bubble.kind : null,
+    confirm: st.confirm ? {
+      cid: st.confirm.cid, kind: st.confirm.kind, title: st.confirm.title,
+      text: st.confirm.text, chips: st.confirm.chips.map((ch) => ch.label),
+      chipIds: st.confirm.chips.map((ch) => ch.id),
+      boxes: st.confirm.boxes, dismissBox: st.confirm.dismissBox, panelBox: st.confirm.panelBox,
+      autoRemainMs: st.confirm.autoAt && !st.confirm.autoFired
+        ? Math.max(0, Math.round(st.confirm.autoAt - now())) : null,
+    } : null,
     frame: (() => { const f = pickFrame().f; for (const k in FRAMES) if (FRAMES[k] === f) return k; return null; })(),
     grooming: now() < st.groomUntil,
     tilting: now() < st.tiltUntil,

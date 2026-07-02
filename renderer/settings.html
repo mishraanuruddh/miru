@@ -16,6 +16,7 @@
         <button data-tab="reminders">REMINDERS</button>
         <button data-tab="agents">AI AGENTS</button>
         <button data-tab="launcher">LAUNCHER</button>
+        <button data-tab="voice">VOICE</button>
         <button data-tab="inbox">INBOX</button>
         <button data-tab="about">ABOUT</button>
       </nav>
@@ -189,6 +190,20 @@
             <button id="remAdd" class="btn yellow">+ ADD</button>
           </div>
         </div>
+
+        <h2>FOLLOW-UPS</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="fuEnabled" /><i></i> BRING THE NOTE BACK IF A TO-DO SLIPS <em>chips: done · +30m · tonight · drop</em></label>
+          <label class="field"><span>AFTER (MINUTES)</span><input id="fuMinutes" type="number" min="5" max="120" /></label>
+          <p class="hint">Two gentle nudges, then she lets it rest (it stays amber in the menu). Never a guilt trip.</p>
+        </div>
+
+        <h2>EVENING WIND-DOWN</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="wdEnabled" /><i></i> OFFER TO SWEEP LEFTOVERS TO TOMORROW</label>
+          <label class="field"><span>AT</span><input id="wdTime" type="time" /></label>
+          <p class="hint">Once per evening, only if something is still due today. A clean day passes in silence.</p>
+        </div>
       </section>
 
       <!-- =============================================== AGENTS -->
@@ -293,6 +308,46 @@
           <p class="hint" style="margin-top:0">The cat keeps a tiny task list (TASKS page in its menu).
             Add from anywhere: <code id="todoExample">curl -X POST http://127.0.0.1:41999/todo -d '{"text":"ship it"}'</code>
             — or dictate with Murmur into any app and paste. Click a task on the cat to check it off.</p>
+        </div>
+      </section>
+
+      <!-- ================================================ VOICE -->
+      <section id="tab-voice" class="tab">
+        <h1>VOICE</h1>
+        <p class="hint big">Talk to the cat: one sentence becomes a to-do, a note, a quick answer, an
+          opened app, or a command typed into a live agent terminal. Everything shows chips before it
+          acts, and can be undone with a tap.</p>
+
+        <h2>TALK TO THE CAT</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="voiceEnabled" /><i></i> ENABLE VOICE <em>press, speak, done — she does the rest</em></label>
+          <label class="toggle"><input type="checkbox" id="voiceHotkey" /><i></i> GLOBAL HOTKEY <em>⌃⌥Space toggles listening from anywhere</em></label>
+          <p class="hint">Also in the cat's menu as TALK. Stop by pressing again, clicking the cat, or just going quiet.</p>
+          <div class="statusline"><span class="hint" id="voiceAvail" style="flex:1">checking…</span></div>
+        </div>
+
+        <h2>BEHAVIOR</h2>
+        <div class="panel">
+          <label class="field"><span>NOTES FOLDER</span><input id="voiceNotesDir" type="text" /></label>
+          <p class="hint">"note: …" appends to a daily markdown file (YYYY-MM-DD.md) in this folder.</p>
+          <label class="field"><span>AUTO-CONFIRM (SECONDS)</span><input id="voiceAutoConfirm" type="number" min="0" max="10" step="0.5" /></label>
+          <p class="hint">To-dos and notes commit on their own after this countdown (0 = always ask).
+            Agent commands ALWAYS need a click.</p>
+          <label class="field"><span>MAX RECORDING (SECONDS)</span><input id="voiceMaxRecord" type="number" min="5" max="30" /></label>
+        </div>
+
+        <h2>AGENT COMMANDS</h2>
+        <div class="panel">
+          <label class="toggle"><input type="checkbox" id="voiceAgentCommands" /><i></i> ALLOW "TELL CLAUDE …" <em>types into the live session — always asks first</em></label>
+          <label class="toggle"><input type="checkbox" id="voiceAgentEnter" /><i></i> PRESS ENTER AFTER TYPING <em>off = the text waits in the prompt for your review</em></label>
+        </div>
+
+        <h2>BRAIN</h2>
+        <div class="panel">
+          <p class="hint" style="margin-top:0">Utterances are routed by <code>claude -p</code> (haiku, headless).
+            Offline or over the daily cap, a built-in router takes over ("remind me…", "note…", "open…", "tell claude…").</p>
+          <label class="field"><span>DAILY BRAIN CALL CAP</span><input id="voiceBrainCap" type="number" min="0" max="2000" /></label>
+          <div class="statusline"><span class="hint" id="voiceUsageLine" style="flex:1">—</span></div>
         </div>
       </section>
 

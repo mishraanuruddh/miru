@@ -26,6 +26,11 @@ const TOOLS = [
     description: 'Full state of the desktop cat: agent sessions, tasks, pomodoro, pending question.',
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'cat_voice',
+    description: "Route a natural-language command through the desktop cat's brain: to-dos ('remind me to X at 4pm'), notes ('note: ...'), open apps, or captures. The user confirms via chips on the cat before anything happens.",
+    inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'One short utterance' } }, required: ['text'] },
+  },
 ];
 
 async function callTool(name, args) {
@@ -50,6 +55,11 @@ async function callTool(name, args) {
     case 'cat_status': {
       const s = await (await fetch(BASE + '/status')).json();
       return JSON.stringify(s, null, 2);
+    }
+    case 'cat_voice': {
+      const r = await post('/voice', { text: String(args.text || '') });
+      if (!r.ok) return 'The cat is busy (' + (r.error || 'try again') + ').';
+      return `Routed as ${r.intent}. The user confirms on the cat.`;
     }
   }
   throw new Error('unknown tool ' + name);

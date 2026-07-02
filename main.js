@@ -1,17 +1,20 @@
 'use strict';
 const {
   app, BrowserWindow, Tray, Menu, screen, ipcMain, shell,
-  systemPreferences, nativeImage, globalShortcut, Notification,
+  systemPreferences, nativeImage, globalShortcut, Notification, clipboard,
 } = require('electron');
 const path = require('path');
 const http = require('http');
 const os = require('os');
+const fs = require('fs');
 const { execFile } = require('child_process');
 const { Store } = require('./lib/store');
 const { buildTrayIcon } = require('./lib/trayIcon');
 const claudeHooks = require('./lib/claudeHooks');
 const codexHooks = require('./lib/codexHooks');
-const { focusTty, typeKeys } = require('./lib/focusTty');
+const { focusTty, typeKeys, typeText } = require('./lib/focusTty');
+const brain = require('./lib/brain');
+const transcribeLib = require('./lib/transcribe');
 
 const SMOKE = process.argv.includes('--smoke');
 const SHOT = (() => {
@@ -481,6 +484,9 @@ function handleClaudeHook(route, data, tty) {
         tty: sTty,
       };
       sessionUpsert(sid, { state: 'alert', hasQuestion: true, tty: sTty });
+      // a live agent question outranks ambient nudges
+      if (activeConfirm && AMBIENT_CONFIRM[activeConfirm.kind]) clearConfirm('preempted');
+      pushInbox('claude asks: ' + String(q.question || '').slice(0, 80), 'ask');
       send('ask', { ...pendingQuestion });
       break;
     }
@@ -525,10 +531,16 @@ function startAgentServer() {
           tasks: (store.get().tasks || []).map((t) => ({
             id: t.id, text: t.text, done: !!t.done,
             due: t.due || null, remindedAt: t.remindedAt || null,
+            followUps: t.followUps || 0, lastFollowUpAt: t.lastFollowUpAt || null,
             overdue: !!(t.due && !t.done && t.due < Date.now()),
           })),
+          confirm: activeConfirm
+            ? { cid: activeConfirm.cid, kind: activeConfirm.kind, taskIds: activeConfirm.taskIds }
+            : null,
           inboxCount: inbox.length,
           pomodoro: pom.phase === 'off' ? null : { phase: pom.phase, remaining: pom.remaining, paused: pom.paused },
+          voice: { phase: voice.phase, availability: brain.availability(), usage: voiceUsageRoll() },
+          windDownDay: bond().windDownDay || null,
         });
       }
       if (req.method !== 'POST') return done(404, { ok: false });
@@ -564,6 +576,64 @@ function startAgentServer() {
         if (p === '/url') {
           return done(200, handleDeepLink(data.url));
         }
+        if (p === '/voice') {
+          const text = String(data.text || '').slice(0, 400).trim();
+          if (!text) {
+            if (TEST) return done(400, { ok: false, error: 'no text' });
+            voiceToggle('api').then((r) => done(r.ok ? 200 : 409, r));
+            return;
+          }
+          if (voice.phase !== 'idle') return done(409, { ok: false, error: 'busy' });
+          handleVoiceTranscript(text, 'api')
+            .then((r) => done(200, { ok: true, ...r }))
+            .catch((err) => { voiceReset(); done(500, { ok: false, error: err.message }); });
+          return;
+        }
+        if (TEST && p === '/test/task-clock') {
+          // rewind task clocks so 30-minute follow-ups happen inside a test
+          const rewindMs = Number(data.rewindMs) || 0;
+          const tasks = (store.get().tasks || []).map((t) => {
+            if (data.id && t.id !== data.id) return t;
+            const patched = { ...t };
+            for (const k of ['due', 'remindedAt', 'lastFollowUpAt']) {
+              if (patched[k]) patched[k] -= rewindMs;
+            }
+            return patched;
+          });
+          store.set({ tasks });
+          broadcastSettings();
+          if (process.env.FU_DEBUG) console.error('[fu] task-clock', JSON.stringify({ id: data.id, rewindMs, after: tasks.map((t) => ({ id: t.id, due: t.due, remindedAt: t.remindedAt })) }));
+          return done(200, { ok: true, tasks });
+        }
+        if (TEST && p === '/test/away') {
+          // pretend the last activity before now happened `minutes` ago
+          awayPrevActivityT = Date.now() - (Number(data.minutes) || 0) * 60000;
+          return done(200, { ok: true });
+        }
+        if (TEST && p === '/test/sessions-clear') {
+          sessions.clear();
+          clearQuestion();
+          emitAgents();
+          return done(200, { ok: true });
+        }
+        if (TEST && p === '/test/voice-classify') {
+          // classify-only: no pipeline side effects (brain unit scenarios)
+          brain.classify(String(data.text || ''), { test: true })
+            .then((route) => done(200, { ok: true, route }));
+          return;
+        }
+        if (TEST && p === '/test/voice-phase') {
+          // drive the renderer's listening visuals without a real mic
+          send('voice:state', { phase: String(data.phase || 'idle'), vid: 'vtest', maxMs: 15000 });
+          return done(200, { ok: true });
+        }
+        if (TEST && p === '/test/voice-route') {
+          // inject a post-classify route straight into the dispatcher
+          if (voice.phase !== 'idle') return done(409, { ok: false, error: 'busy' });
+          const route = { confidence: 0.9, source: 'test', ...(data.route || {}) };
+          const r = dispatchRoute(route, String(route.text || route.agent || ''));
+          return done(200, { ok: true, ...r });
+        }
         if (p === '/todo') {
           const raw = String(data.text || '').slice(0, 110);
           if (!raw) return done(400, { ok: false, error: 'no text' });
@@ -577,16 +647,38 @@ function startAgentServer() {
           if (data.engagement != null) { b.today.engagement = data.engagement; store.set({ bond: b }); }
           if (data.activeYesterday) { b.today.todosDone = 1; store.set({ bond: b }); }
           testDayOverride = String(data.day);
+          // the wind-down hour override resets on EVERY roll: a scenario must
+          // opt in each time, so no hour leaks into later scenarios
+          testHourOverride = null;
+          if (data.hour != null) {
+            const [hh, mm] = String(data.hour).split(':').map(Number);
+            testHourOverride = (hh || 0) * 60 + (mm || 0);
+          }
           bondDailyRoll(testDayOverride, { forceGift: data.forceGift });
           if (data.greeted) {
-            // mark the rolled day as already greeted (and drop the queued
-            // gift) so no morning ritual fires into later scenarios
+            // mark the rolled day as already greeted + wound-down (and drop
+            // the queued gift) so no ritual fires into later scenarios;
+            // windDown:false keeps the evening armed for wind-down scenarios
             const b3 = bond();
             b3.greetedDay = testDayOverride;
+            if (data.windDown !== false) b3.windDownDay = testDayOverride;
             b3.pendingGift = null;
             store.set({ bond: b3 });
           }
           return done(200, { ok: true, bond: { ...bond(), level: bondLevel(bond().xp) } });
+        }
+        if (TEST && p === '/test/confirm') {
+          // drive the shared chip panel directly; chip/dismiss land in askCalls
+          const cid = showConfirm({
+            kind: data.kind || 'voice',
+            title: data.title || 'TEST',
+            text: data.text || '',
+            chips: data.chips || [{ id: 'confirm', label: 'OK' }, { id: 'cancel', label: 'CANCEL' }],
+            autoConfirmMs: data.autoConfirmMs || null,
+            onChip: (id) => askCalls.push({ confirmChip: id }),
+            onDismiss: (reason) => askCalls.push({ confirmDismiss: reason }),
+          });
+          return done(200, { ok: !!cid, cid });
         }
         if (p.startsWith('/hook/claude/')) {
           const route = p.slice('/hook/claude/'.length);
@@ -830,6 +922,7 @@ function bondDailyRoll(today, opts = {}) {
 
   b.today = { day: today, todosDone: 0, pomodoros: 0, engagement: 0 };
   b.greetedDay = null;
+  b.windDownDay = null;
 
   // overnight gift: chance scales with yesterday's shared work; milestones guarantee one
   const milestone = [7, 30, 100, 365].includes(b.daysTogether) || (b.streak > 0 && [7, 30, 100].includes(b.streak));
@@ -842,15 +935,15 @@ function bondDailyRoll(today, opts = {}) {
 
 // morning ritual: first activity of a new day -> greeting (+ gift presentation)
 let lastRitualCheck = 0;
-let testDayOverride = null; // TEST only: pin "today" to the rolled day
+let testDayOverride = null;  // TEST only: pin "today" to the rolled day
+let testHourOverride = null; // TEST only: minutes since midnight for wind-down
 function checkRituals() {
   if (!store || !catWin || catWin.isDestroyed() || !catWin.isVisible()) return;
   const now = Date.now();
   if (now - lastRitualCheck < 5000) return;
   lastRitualCheck = now;
   const d = new Date(now);
-  const localToday = (TEST && testDayOverride) ? testDayOverride
-    : d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const localToday = (TEST && testDayOverride) ? testDayOverride : localDayStr(d);
   const b = bond();
   if (b.today.day !== localToday) bondDailyRoll(localToday);
   const active = now - lastActivityT < 15000;
@@ -890,6 +983,92 @@ function checkRituals() {
   bondSave(b2);
 }
 setIntervalSafe(checkRituals, TEST ? 1200 : 6000);
+
+// evening wind-down: once per evening, if something is still due today,
+// offer to sweep it to tomorrow. Never a guilt trip; silence on clean days.
+function checkWindDown() {
+  if (!store || !catWin || catWin.isDestroyed() || !catWin.isVisible()) return;
+  const s = store.get();
+  if (!s.windDown || s.windDown.enabled === false) return;
+  if (TEST && testHourOverride == null) return; // inert under the harness unless opted in
+  const now = Date.now();
+  const d = new Date(now);
+  const localToday = (TEST && testDayOverride) ? testDayOverride : localDayStr(d);
+  const b = bond();
+  if (b.windDownDay === localToday) return;   // once per day
+  if (b.greetedDay !== localToday) return;    // the greeting ritual goes first
+  const [h, m] = String(s.windDown.time || '18:30').split(':').map(Number);
+  const nowMin = TEST ? testHourOverride : d.getHours() * 60 + d.getMinutes();
+  if (nowMin < (h || 18) * 60 + (m || 0) || nowMin >= 23 * 60) return; // window: time → 23:00
+  if (now - lastActivityT > 15000) return;    // carries to the first activity inside the window
+  if (activeConfirm || pendingQuestion) return;
+  const eod = new Date(d);
+  eod.setHours(23, 59, 59, 999);
+  const open = (s.tasks || []).filter((t) => !t.done && t.due && t.due <= eod.getTime());
+  const b2 = bond();
+  b2.windDownDay = localToday; // marked at decision time — never re-fires today
+  store.set({ bond: b2 });
+  if (!open.length) return;    // clean evening: the ritual is silence
+  sendWindDown(open);
+}
+setIntervalSafe(checkWindDown, TEST ? 1200 : 30000);
+
+function sendWindDown(open) {
+  showConfirm({
+    kind: 'winddown',
+    title: 'WIND-DOWN',
+    text: open.length + ' LEFT TODAY — TOMORROW?',
+    chips: [
+      { id: 'sweep', label: 'TOMORROW 9AM' },
+      { id: 'keep', label: 'KEEP TONIGHT' },
+    ],
+    autoConfirmMs: null,
+    taskIds: open.map((t) => t.id),
+    onChip: (id) => {
+      if (id === 'sweep') {
+        for (const t of open) rescheduleTask(t.id, tomorrowAt(9, 0));
+        pushInbox('swept ' + open.length + ' to tomorrow 9am', 'todo');
+        send('remind', { text: 'SEE THEM AT 9AM!', kind: 'say' });
+      } else {
+        send('remind', { text: 'CHEERING FOR YOU!', kind: 'say' });
+      }
+    },
+    onDismiss: () => {}, // day already marked; the evening stays quiet
+  });
+}
+
+// while-you-were-away digest: come back after 2+ hours and get one bubble
+// summarizing what happened; click leads to the inbox. Greeting goes first.
+const AWAY_MIN_MS = 2 * 3600000;
+let awayPrevActivityT = Date.now();
+let digestTimer = null;
+function checkAwayReturn() {
+  const a = lastActivityT;
+  if (a === awayPrevActivityT) return; // still away, or nothing new
+  const gap = a - awayPrevActivityT;
+  awayPrevActivityT = a;
+  if (gap < AWAY_MIN_MS) return;
+  clearTimeout(digestTimer); // one pending digest max
+  digestTimer = setTimeout(() => sendAwayDigest(a - gap), TEST ? 6000 : 10000); // TEST: outlast the 5s ritual throttle so the greeting stays first
+}
+setIntervalSafe(checkAwayReturn, TEST ? 400 : 5000);
+
+function sendAwayDigest(awayStartT) {
+  if (!catWin || catWin.isDestroyed() || !catWin.isVisible()) return;
+  if (pendingQuestion || activeConfirm) return; // a live ask IS the headline
+  const since = inbox.filter((e) => e.t >= awayStartT);
+  const runs = since.filter((e) => e.kind === 'agent').length;
+  const asks = since.filter((e) => e.kind === 'ask').length;
+  const due = (store.get().tasks || []).filter((t) => !t.done && t.due && t.due <= Date.now()).length;
+  const notes = since.filter((e) => ['say', 'reminder', 'todo'].includes(e.kind)).length;
+  const parts = [];
+  if (runs) parts.push(runs + (runs === 1 ? ' AGENT RUN' : ' AGENT RUNS'));
+  if (asks) parts.push(asks + (asks === 1 ? ' ASK' : ' ASKS'));
+  if (due) parts.push(due + ' DUE');
+  if (!parts.length && notes) parts.push(notes + (notes === 1 ? ' NOTE' : ' NOTES'));
+  if (!parts.length) return; // nothing happened: no bubble
+  send('remind', { text: 'WHILE YOU WERE OUT: ' + parts.join(' · '), kind: 'say' });
+}
 
 // ------------------------------------------------------- launcher / gateway
 const inbox = []; // {text, t, kind} — persisted via store.inboxLog
@@ -935,30 +1114,155 @@ function parseDue(raw) {
 function addTask(rawText) {
   const { text, due } = parseDue(String(rawText).slice(0, 110));
   const tasks = store.get().tasks || [];
+  const id = 't' + Date.now() + Math.floor(Math.random() * 999);
   tasks.unshift({
-    id: 't' + Date.now() + Math.floor(Math.random() * 999),
-    text: text.slice(0, 80), done: false, due, remindedAt: null,
+    id, text: text.slice(0, 80), done: false, due, remindedAt: null,
+    followUps: 0, lastFollowUpAt: null,
   });
   store.set({ tasks: tasks.slice(0, 30) });
   broadcastSettings();
-  return { text, due };
+  return { id, text, due };
 }
 
-// due-time watcher: meow when a to-do comes due
-setIntervalSafe(() => {
+// shared task mutations: menu IPC, HTTP, and chip panels all route through
+// these so side effects (bond XP, inbox trails) stay consistent
+function patchTask(id, patch) {
+  const tasks = (store.get().tasks || []).map((t) => (t.id === id ? { ...t, ...patch } : t));
+  store.set({ tasks });
+  broadcastSettings();
+}
+function toggleTask(id) {
+  const before = (store.get().tasks || []).find((t) => t.id === id);
+  if (!before) return;
+  patchTask(id, { done: !before.done });
+  if (!before.done) bondEvent('todoDone'); // checked off together
+  // completing a task melts any chip panel that was nagging about it
+  if (activeConfirm && (activeConfirm.taskIds || []).includes(id)) clearConfirm('resolved');
+}
+function snoozeTask(id, ms) {
+  // a deliberate snooze restarts a fresh, gentle follow-up cycle
+  patchTask(id, { due: Date.now() + ms, remindedAt: null, followUps: 0, lastFollowUpAt: null });
+}
+function rescheduleTask(id, dueTs) {
+  patchTask(id, { due: dueTs, remindedAt: null, followUps: 0, lastFollowUpAt: null });
+}
+function dropTask(id) {
+  const t = (store.get().tasks || []).find((x) => x.id === id);
+  if (!t) return;
+  store.set({ tasks: (store.get().tasks || []).filter((x) => x.id !== id) });
+  broadcastSettings();
+  pushInbox('dropped: ' + t.text, 'todo');
+  if (activeConfirm && (activeConfirm.taskIds || []).includes(id)) clearConfirm('resolved');
+}
+function todayAt(h, m) {
+  const d = new Date();
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+function tomorrowAt(h, m) {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(h, m, 0, 0);
+  return d.getTime();
+}
+function localDayStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// due-time watcher: meow when a to-do comes due, then close the loop —
+// a reminder that goes unanswered comes back as chips, twice, then rests
+function taskWatcherTick() {
   if (!store) return;
+  const now = Date.now();
   const tasks = store.get().tasks || [];
   let changed = false;
   for (const t of tasks) {
-    if (t.due && !t.done && !t.remindedAt && t.due <= Date.now()) {
-      t.remindedAt = Date.now();
+    if (t.due && !t.done && !t.remindedAt && t.due <= now) {
+      t.remindedAt = now;
       changed = true;
+      if (TEST && process.env.FU_DEBUG) console.error('[fu] due-fired', JSON.stringify({ id: t.id, due: t.due }));
       send('remind', { text: 'DUE: ' + t.text.toUpperCase(), kind: 'reminder' });
       pushInbox('due: ' + t.text, 'todo');
     }
   }
   if (changed) { store.set({ tasks }); broadcastSettings(); }
-}, TEST ? 700 : 15000);
+  taskFollowUpTick(now);
+}
+setIntervalSafe(taskWatcherTick, TEST ? 700 : 15000);
+
+function taskFollowUpTick(now) {
+  const s = store.get();
+  const fuLog = (why, extra) => {
+    if (TEST && process.env.FU_DEBUG) console.error('[fu]', why, JSON.stringify(extra || {}));
+  };
+  if (!s.followUp || s.followUp.enabled === false) return fuLog('disabled');
+  if (activeConfirm || pendingQuestion) return fuLog('busy', { confirm: !!activeConfirm, q: !!pendingQuestion });
+  if (now - lastConfirmClosedAt < (TEST ? 2000 : 60000)) return fuLog('breathing', { since: now - lastConfirmClosedAt });
+  if (now - lastActivityT > 90000) return fuLog('inactive');
+  if (!catWin || catWin.isDestroyed() || !catWin.isVisible()) return fuLog('hidden');
+  const delay = (s.followUp.minutes || 30) * 60000;                   // never TEST-shortened; tests rewind clocks
+  const cand = (s.tasks || [])
+    .filter((t) => t.remindedAt && !t.done && (t.followUps || 0) < 2)
+    .sort((a, b) => a.remindedAt - b.remindedAt)[0];
+  if (!cand) return fuLog('no candidate', { tasks: (s.tasks || []).length });
+  const since = now - (cand.lastFollowUpAt || cand.remindedAt);
+  if (since < delay) return fuLog('too soon', { id: cand.id, since });
+  if (since > 6 * 3600000) {
+    // overnight/asleep: retire silently — stays amber in the menu
+    patchTask(cand.id, { followUps: 2, lastFollowUpAt: now });
+    return;
+  }
+  sendTaskFollowUp(cand, now);
+}
+
+function sendTaskFollowUp(task, now) {
+  const n = (task.followUps || 0) + 1;
+  const first = n === 1;
+  const hour = new Date(now).getHours();
+  const chips = first
+    ? [
+        { id: 'done', label: 'DONE' },
+        { id: 'snooze30', label: '+30M' },
+        hour < 17 ? { id: 'tonight', label: 'TONIGHT' } : { id: 'tomorrow', label: 'TOMORROW' },
+        { id: 'drop', label: 'DROP' },
+      ]
+    : [
+        { id: 'done', label: 'DONE' },
+        { id: 'tomorrow', label: 'TOMORROW' },
+        { id: 'drop', label: 'DROP' },
+      ];
+  const cid = showConfirm({
+    kind: 'followup',
+    title: first ? 'YOUR NOTE' : 'NO RUSH',
+    text: first ? task.text : task.text + ' — TOMORROW?',
+    chips,
+    autoConfirmMs: null,
+    taskIds: [task.id],
+    onChip: (id) => handleFollowUpChip(task.id, id),
+    onDismiss: () => {}, // the nudge was counted; next one (or rest) comes naturally
+  });
+  if (cid) patchTask(task.id, { followUps: n, lastFollowUpAt: now });
+}
+
+function handleFollowUpChip(taskId, chipId) {
+  const t = (store.get().tasks || []).find((x) => x.id === taskId);
+  if (!t) return;
+  if (chipId === 'done') {
+    toggleTask(taskId);
+    send('remind', { text: 'NICE ONE!', kind: 'say' });
+  } else if (chipId === 'snooze30') {
+    snoozeTask(taskId, 30 * 60000);
+    send('remind', { text: 'BACK IN 30M!', kind: 'say' });
+  } else if (chipId === 'tonight') {
+    rescheduleTask(taskId, todayAt(18, 0));
+    send('remind', { text: 'TONIGHT AT 6PM!', kind: 'say' });
+  } else if (chipId === 'tomorrow') {
+    rescheduleTask(taskId, tomorrowAt(9, 0));
+    send('remind', { text: 'TOMORROW 9AM!', kind: 'say' });
+  } else if (chipId === 'drop') {
+    dropTask(taskId); // silent melt; the inbox keeps the trail
+  }
+}
 
 function murmurAppPath() {
   return String(store.get().launcher.murmurApp || '').replace(/^~/, os.homedir());
@@ -985,6 +1289,10 @@ function triggerVoice() {
 function runMenuAction(act) {
   if (!act || typeof act !== 'object') return;
   switch (act.type) {
+    case 'talk':
+      if (TEST) { askCalls.push({ menuAction: 'talk' }); break; }
+      voiceToggle('menu');
+      break;
     case 'voice':
       triggerVoice();
       break;
@@ -1006,25 +1314,13 @@ function runMenuAction(act) {
 
 function setupLauncherIpc() {
   ipcMain.on('menu:action', (e, act) => runMenuAction(act));
-  ipcMain.on('tasks:toggle', (e, { id }) => {
-    const before = (store.get().tasks || []).find((t) => t.id === id);
-    const tasks = (store.get().tasks || []).map((t) => (t.id === id ? { ...t, done: !t.done } : t));
-    store.set({ tasks });
-    broadcastSettings();
-    if (before && !before.done) bondEvent('todoDone'); // checked off together
-  });
+  ipcMain.on('tasks:toggle', (e, { id }) => toggleTask(id));
   ipcMain.on('tasks:clear-done', () => {
     store.set({ tasks: (store.get().tasks || []).filter((t) => !t.done) });
     broadcastSettings();
   });
   ipcMain.on('tasks:add', (e, { text }) => { if (text) addTask(text); });
-  ipcMain.on('tasks:snooze', (e, { id }) => {
-    const tasks = (store.get().tasks || []).map((t) =>
-      t.id === id ? { ...t, due: Date.now() + 10 * 60000, remindedAt: null } : t
-    );
-    store.set({ tasks });
-    broadcastSettings();
-  });
+  ipcMain.on('tasks:snooze', (e, { id }) => snoozeTask(id, 10 * 60000));
   ipcMain.on('win:focusable', (e, v) => {
     if (!catWin || catWin.isDestroyed()) return;
     catWin.setFocusable(!!v);
@@ -1080,21 +1376,40 @@ function handleDeepLink(url) {
       if (['start', 'toggle-pause', 'skip', 'stop'].includes(action)) { pomControl(action); return { ok: true, cmd }; }
       return { ok: false, error: 'bad action' };
     }
+    case 'voice': {
+      if (text && voice.phase === 'idle') {
+        handleVoiceTranscript(text.slice(0, 400), 'url').catch(() => voiceReset());
+        return { ok: true, cmd };
+      }
+      voiceToggle('url');
+      return { ok: true, cmd };
+    }
   }
   return { ok: false, error: 'unknown command' };
 }
 
 function registerHotkey() {
   globalShortcut.unregisterAll();
-  if (!store.get().launcher.hotkey || HARNESS) return;
-  try {
-    globalShortcut.register('Control+Alt+C', () => {
-      if (!catWin || catWin.isDestroyed()) createCatWindow();
-      else if (!catWin.isVisible()) catWin.show();
-      send('menu:toggle', {});
-    });
-  } catch (e) {
-    console.error('[hotkey]', e.message);
+  if (HARNESS) return;
+  const s = store.get();
+  if (s.launcher.hotkey) {
+    try {
+      globalShortcut.register('Control+Alt+C', () => {
+        if (!catWin || catWin.isDestroyed()) createCatWindow();
+        else if (!catWin.isVisible()) catWin.show();
+        send('menu:toggle', {});
+      });
+    } catch (e) {
+      console.error('[hotkey]', e.message);
+    }
+  }
+  if (s.voice && s.voice.enabled !== false && s.voice.hotkey !== false) {
+    try {
+      const ok = globalShortcut.register('Control+Alt+Space', () => voiceToggle('hotkey'));
+      if (!ok) globalShortcut.register('Control+Alt+V', () => voiceToggle('hotkey'));
+    } catch (e) {
+      console.error('[hotkey voice]', e.message);
+    }
   }
 }
 
@@ -1148,6 +1463,409 @@ function setupAskIpc() {
       extraQuestions: 0, canType: false, tty: null,
     };
     send('ask', { ...pendingQuestion });
+  });
+}
+
+// ---------------------------------------------------- confirm chips (shared)
+// One panel serves voice confirmations, todo follow-ups and wind-down.
+// One at a time: ambient kinds refuse while anything else needs the user;
+// user-initiated (voice) kinds preempt ambient ones.
+let activeConfirm = null; // {cid, kind, taskIds, onChip, onDismiss, expireTimer}
+let lastConfirmClosedAt = 0;
+const AMBIENT_CONFIRM = { followup: 1, winddown: 1 };
+
+function showConfirm({ kind, title, text, chips, autoConfirmMs = null, taskIds = [], onChip, onDismiss }) {
+  if (AMBIENT_CONFIRM[kind] && (activeConfirm || pendingQuestion)) return null;
+  if (activeConfirm) clearConfirm('preempted');
+  const cid = 'c' + Date.now() + Math.floor(Math.random() * 999);
+  activeConfirm = {
+    cid, kind, taskIds, onChip, onDismiss,
+    expireTimer: setTimeout(() => clearConfirm('expired'), TEST ? 15000 : 60000),
+  };
+  send('confirm', { cid, kind, title, text, chips, autoConfirmMs });
+  return cid;
+}
+
+function clearConfirm(reason) {
+  if (!activeConfirm) return;
+  const c = activeConfirm;
+  activeConfirm = null;
+  clearTimeout(c.expireTimer);
+  lastConfirmClosedAt = Date.now();
+  send('confirm-clear', { cid: c.cid });
+  if (c.onDismiss) { try { c.onDismiss(reason); } catch (e) { console.error('[confirm]', e); } }
+}
+
+function setupConfirmIpc() {
+  ipcMain.on('confirm:action', (e, { cid, id }) => {
+    if (!activeConfirm || activeConfirm.cid !== cid) return; // idempotent: first wins
+    const c = activeConfirm;
+    activeConfirm = null;
+    clearTimeout(c.expireTimer);
+    lastConfirmClosedAt = Date.now();
+    send('confirm-clear', { cid });
+    if (c.onChip) { try { c.onChip(String(id)); } catch (err) { console.error('[confirm]', err); } }
+  });
+  ipcMain.on('confirm:dismiss', (e, { cid, reason }) => {
+    if (!activeConfirm || activeConfirm.cid !== cid) return;
+    clearConfirm(reason || 'dismissed');
+  });
+}
+
+// --------------------------------------------------------------- voice spine
+// utterance → brain route → confirm chips → action. Main owns the phases;
+// the renderer records audio and mirrors state for visuals.
+const voice = {
+  phase: 'idle', // idle | listening | transcribing | routing | confirm
+  vid: null, transcript: null, route: null, undo: null, watchdog: null,
+};
+
+function voiceUsageRoll() {
+  const u = store.get().voiceUsage || { day: null, calls: 0, costUsd: 0 };
+  const day = localDayStr(new Date());
+  if (u.day !== day) {
+    const fresh = { day, calls: 0, costUsd: 0 };
+    store.set({ voiceUsage: fresh });
+    return fresh;
+  }
+  return u;
+}
+function brainCapped() {
+  return voiceUsageRoll().calls >= (store.get().voice.dailyBrainCap || 150);
+}
+function brainSpent(route) {
+  if (!route || route.source !== 'llm') return;
+  const u = voiceUsageRoll();
+  store.set({ voiceUsage: { day: u.day, calls: u.calls + 1, costUsd: +(u.costUsd + (route._cost || 0)).toFixed(4) } });
+}
+
+function voiceReset() {
+  clearTimeout(voice.watchdog);
+  voice.watchdog = null;
+  voice.phase = 'idle';
+  voice.vid = null;
+  voice.transcript = null;
+  voice.route = null;
+  send('voice:state', { phase: 'idle' });
+}
+
+async function handleVoiceTranscript(text, source) {
+  voice.phase = 'routing';
+  send('voice:state', { phase: 'routing' });
+  let route;
+  try {
+    route = await brain.classify(text, { test: !!TEST, capped: brainCapped() });
+  } catch (e) {
+    route = brain.classifyFallback(text);
+  }
+  brainSpent(route);
+  voice.transcript = text;
+  return dispatchRoute(route, text);
+}
+
+function dispatchRoute(route, transcript) {
+  voice.route = route;
+  if (route.intent === 'quick_answer' && route.answer) {
+    send('remind', { text: String(route.answer).toUpperCase().slice(0, 120), kind: 'say' });
+    pushInbox('Q: ' + transcript + ' → ' + route.answer, 'answer');
+    voiceReset();
+    return { intent: route.intent, route };
+  }
+  if (route.degraded) {
+    // a question with no brain online: capture honestly instead of guessing
+    if (!TEST) clipboard.writeText(transcript);
+    pushInbox(transcript, 'captured');
+    send('remind', { text: 'BRAIN OFFLINE — CAPTURED', kind: 'say' });
+    voiceReset();
+    return { intent: 'captured', route };
+  }
+  buildConfirm(route);
+  return { intent: route.intent, route };
+}
+
+function buildConfirm(route) {
+  if (route.intent === 'ask_agent') return buildAgentConfirm(route);
+  voice.phase = 'confirm';
+  send('voice:state', { phase: 'confirm' });
+  const auto = store.get().voice.autoConfirmMs;
+  const spec = {
+    todo: { title: 'ADD TO-DO?', text: route.text + (route.due ? ' @ ' + route.due : ''), ok: 'ADD' },
+    note: { title: 'SAVE NOTE?', text: route.text, ok: 'SAVE' },
+    open_app: { title: 'OPEN ' + String(route.app || '').toUpperCase() + '?', text: route.app || '', ok: 'OPEN' },
+    other: { title: 'CAPTURE?', text: route.text, ok: 'SAVE' },
+  }[route.intent] || { title: 'CAPTURE?', text: route.text, ok: 'SAVE' };
+  showConfirm({
+    kind: 'voice',
+    title: spec.title,
+    text: spec.text,
+    chips: [{ id: 'confirm', label: spec.ok }, { id: 'cancel', label: 'CANCEL' }],
+    autoConfirmMs: auto == null ? 3000 : auto,
+    onChip: (id) => {
+      if (id === 'confirm') executeIntent(route);
+      else voiceReset();
+    },
+    onDismiss: () => { if (voice.phase === 'confirm') voiceReset(); },
+  });
+}
+
+function notesDirPath() {
+  return String(store.get().voice.notesDir || '~/notes').replace(/^~/, os.homedir());
+}
+
+function appendNote(text) {
+  try {
+    const dir = notesDirPath();
+    fs.mkdirSync(dir, { recursive: true });
+    const day = localDayStr(new Date());
+    const p = path.join(dir, day + '.md');
+    if (!fs.existsSync(p)) fs.writeFileSync(p, '# Notes — ' + day + '\n\n');
+    const prevSize = fs.statSync(p).size;
+    const d = new Date();
+    const stamp = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    fs.appendFileSync(p, '- [' + stamp + '] ' + text + '\n');
+    return { ok: true, path: p, prevSize };
+  } catch (e) {
+    console.error('[notes]', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+function executeIntent(route, sessionKey) {
+  let undo = null;
+  let message = '';
+  try {
+    if (route.intent === 'todo') {
+      const r = addTask(route.due ? route.text + ' @ ' + route.due : route.text);
+      undo = { kind: 'todo', payload: { id: r.id } };
+      message = 'ADDED — TAP TO UNDO';
+    } else if (route.intent === 'note') {
+      const r = appendNote(route.text);
+      if (r.ok) {
+        undo = { kind: 'note', payload: { path: r.path, prevSize: r.prevSize } };
+        message = 'NOTED — TAP TO UNDO';
+      } else {
+        if (!TEST) clipboard.writeText(route.text);
+        pushInbox(route.text, 'captured');
+        message = 'COULD NOT WRITE NOTE — CAPTURED';
+      }
+    } else if (route.intent === 'open_app') {
+      if (TEST) askCalls.push({ voiceOpen: route.app });
+      else {
+        execFile('open', ['-a', route.app], (e) => {
+          if (e) send('remind', { text: 'COULD NOT OPEN ' + String(route.app).toUpperCase(), kind: 'say' });
+        });
+      }
+      message = 'OPENING ' + String(route.app).toUpperCase();
+    } else if (route.intent === 'ask_agent') {
+      return executeAgentCommand(route, sessionKey);
+    } else {
+      const prevClip = TEST ? '' : clipboard.readText();
+      if (!TEST) clipboard.writeText(route.text);
+      pushInbox(route.text, 'captured');
+      undo = { kind: 'clip', payload: { prevClip } };
+      message = 'CAPTURED TO CLIPBOARD';
+    }
+  } catch (e) {
+    console.error('[voice]', e);
+    pushInbox('voice error: ' + e.message, 'say');
+    message = 'SOMETHING SLIPPED — CHECK INBOX';
+  }
+  finishIntent(message, undo);
+}
+
+function finishIntent(message, undo) {
+  let undoToken = null;
+  if (undo) {
+    undoToken = 'u' + Date.now() + Math.floor(Math.random() * 999);
+    voice.undo = { token: undoToken, ...undo, expiresAt: Date.now() + 12000 };
+  }
+  send('voice:done', { message, undoToken, undoMs: 8000 });
+  voiceReset();
+}
+
+function liveAgentSessions() {
+  return [...sessions.entries()]
+    .filter(([, s]) => s.tty)
+    .map(([key, s]) => ({ key, agent: s.agent || 'agent', tty: s.tty, cwd: s.cwd || '' }));
+}
+
+function buildAgentConfirm(route) {
+  const capture = (msg) => {
+    if (!TEST) clipboard.writeText(route.agent || '');
+    pushInbox(route.agent || '', 'captured');
+    send('remind', { text: msg, kind: 'say' });
+    voiceReset();
+  };
+  if (!route.agent) return capture('HEARD NO COMMAND — CAPTURED');
+  if (store.get().voice.agentCommands === false) return capture('AGENT COMMANDS OFF — CAPTURED');
+  const live = liveAgentSessions();
+  if (!live.length) return capture('NO LIVE AGENT — CAPTURED');
+
+  voice.phase = 'confirm';
+  send('voice:state', { phase: 'confirm' });
+  const common = {
+    kind: 'voice',
+    text: route.agent,
+    autoConfirmMs: null, // typing into a terminal ALWAYS needs a click
+    onDismiss: () => { if (voice.phase === 'confirm') voiceReset(); },
+  };
+  if (live.length === 1) {
+    const s = live[0];
+    showConfirm({
+      ...common,
+      title: 'TYPE INTO ' + (s.agent + '@' + s.tty).toUpperCase() + '?',
+      chips: [{ id: 'confirm', label: 'TYPE IT' }, { id: 'cancel', label: 'CANCEL' }],
+      onChip: (id) => { if (id === 'confirm') executeAgentCommand(route, s.key); else voiceReset(); },
+    });
+  } else {
+    showConfirm({
+      ...common,
+      title: 'WHICH SESSION?',
+      chips: [
+        ...live.slice(0, 3).map((s) => ({ id: 'session:' + s.key, label: (s.agent + '@' + s.tty).toUpperCase() })),
+        { id: 'cancel', label: 'CANCEL' },
+      ],
+      onChip: (id) => {
+        if (id.startsWith('session:')) executeAgentCommand(route, id.slice(8));
+        else voiceReset();
+      },
+    });
+  }
+}
+
+async function executeAgentCommand(route, sessionKey) {
+  const s = sessions.get(sessionKey);
+  const capture = (msg) => {
+    if (!TEST) clipboard.writeText(route.agent || '');
+    pushInbox(route.agent || '', 'captured');
+    finishIntent(msg, null);
+  };
+  if (!s || !s.tty) return capture('SESSION GONE — CAPTURED');
+  const enter = store.get().voice.agentEnter === true;
+  if (TEST) {
+    askCalls.push({ voiceType: { tty: s.tty, text: route.agent, enter } });
+    finishIntent('TYPED INTO TEST', null);
+    return;
+  }
+  const loc = await focusTty(s.tty);
+  if (!loc.located) return capture('WINDOW NOT FOUND — CAPTURED');
+  const r = await typeText(route.agent, { pressEnter: enter });
+  finishIntent(r.ok
+    ? (enter ? 'SENT TO ' + loc.app.toUpperCase() : 'TYPED — REVIEW & HIT ENTER')
+    : 'TYPING FAILED', null);
+}
+
+// entry for hotkey / menu / API / deep link — toggle semantics
+let lastVoiceToggleT = 0;
+async function voiceToggle(source) {
+  const s = store.get();
+  if (!s.voice || s.voice.enabled === false) return { ok: false, error: 'disabled' };
+  const nowT = Date.now();
+  if (nowT - lastVoiceToggleT < 250) return { ok: false, error: 'debounce' };
+  lastVoiceToggleT = nowT;
+  if (voice.phase === 'listening') {
+    send('voice:capture', { cmd: 'stop', vid: voice.vid });
+    return { ok: true, phase: 'stopping' };
+  }
+  if (voice.phase === 'confirm') {
+    clearConfirm('cancelled');
+    voiceReset();
+    return { ok: true, phase: 'cancelled' };
+  }
+  if (voice.phase !== 'idle') return { ok: false, error: 'busy' };
+  if (TEST) return { ok: false, error: 'no mic in test' };
+  if (!catWin || catWin.isDestroyed()) createCatWindow();
+  else if (!catWin.isVisible()) catWin.show();
+  try {
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status !== 'granted') {
+      const granted = await systemPreferences.askForMediaAccess('microphone');
+      if (!granted) {
+        send('remind', { text: 'MIC BLOCKED — SYSTEM SETTINGS → PRIVACY → MICROPHONE', kind: 'say' });
+        return { ok: false, error: 'mic denied' };
+      }
+    }
+  } catch (e) {
+    console.error('[voice mic]', e.message);
+  }
+  voice.phase = 'listening';
+  voice.vid = 'v' + Date.now();
+  const maxMs = Math.max(5, Math.min(30, s.voice.maxRecordS || 15)) * 1000;
+  send('voice:capture', { cmd: 'start', vid: voice.vid, maxMs, silenceMs: 1200 });
+  send('voice:state', { phase: 'listening', vid: voice.vid, maxMs });
+  clearTimeout(voice.watchdog);
+  voice.watchdog = setTimeout(() => {
+    if (voice.phase === 'listening') send('voice:capture', { cmd: 'stop', vid: voice.vid });
+  }, maxMs + 2000);
+  return { ok: true, phase: 'listening' };
+}
+
+function setupVoiceIpc() {
+  ipcMain.on('voice:toggle', (e, { source }) => { voiceToggle(source || 'renderer'); });
+  ipcMain.on('voice:cancel', (e, { vid }) => {
+    if (voice.phase === 'listening' && vid === voice.vid) {
+      send('voice:capture', { cmd: 'cancel', vid });
+      voiceReset();
+    }
+  });
+  ipcMain.on('voice:capture-state', (e, { vid, ok, error }) => {
+    if (vid !== voice.vid) return;
+    if (!ok) {
+      send('remind', {
+        text: error === 'NotAllowedError'
+          ? 'MIC BLOCKED — SYSTEM SETTINGS → PRIVACY → MICROPHONE'
+          : 'NO MICROPHONE FOUND',
+        kind: 'say',
+      });
+      voiceReset();
+    }
+  });
+  ipcMain.handle('voice:audio', async (e, { vid, wav, durationS, speechSeen }) => {
+    if (vid !== voice.vid || voice.phase !== 'listening') return { ok: false, error: 'stale' };
+    clearTimeout(voice.watchdog);
+    if (!speechSeen || !wav || (durationS || 0) < 0.4) {
+      send('remind', { text: 'HEARD NOTHING', kind: 'say' });
+      voiceReset();
+      return { ok: true, heard: false };
+    }
+    voice.phase = 'transcribing';
+    send('voice:state', { phase: 'transcribing' });
+    const r = await transcribeLib.transcribe(Buffer.from(wav), store.get().voice);
+    if (!r.ok) {
+      pushInbox('transcriber offline: ' + (r.error || ''), 'say');
+      send('remind', { text: 'TRANSCRIBER OFFLINE', kind: 'say' });
+      voiceReset();
+      return { ok: false, error: r.error };
+    }
+    if (r.noSpeech) {
+      send('remind', { text: 'HEARD NOTHING', kind: 'say' });
+      voiceReset();
+      return { ok: true, heard: false };
+    }
+    await handleVoiceTranscript(r.text, 'mic');
+    return { ok: true, heard: true, text: r.text };
+  });
+  ipcMain.handle('voice:status', () => ({
+    availability: { ...brain.availability(), ...transcribeLib.availability(store.get().voice) },
+    usage: voiceUsageRoll(),
+  }));
+  ipcMain.on('voice:undo', (e, { token }) => {
+    const u = voice.undo;
+    if (!u || u.token !== token || Date.now() > u.expiresAt) return;
+    voice.undo = null;
+    try {
+      if (u.kind === 'todo') {
+        store.set({ tasks: (store.get().tasks || []).filter((t) => t.id !== u.payload.id) });
+        broadcastSettings();
+      } else if (u.kind === 'note') {
+        fs.truncateSync(u.payload.path, u.payload.prevSize);
+      } else if (u.kind === 'clip') {
+        if (!TEST) clipboard.writeText(u.payload.prevClip || '');
+      }
+      send('remind', { text: 'UNDONE', kind: 'say' });
+    } catch (err) {
+      console.error('[voice undo]', err);
+    }
   });
 }
 
@@ -1233,7 +1951,7 @@ function setupIpc() {
       try { app.setLoginItemSettings({ openAtLogin: !!s.openAtLogin }); } catch (err) { console.error(err); }
     }
     if (partial.stretch) lastStretchT = Date.now();
-    if (partial.launcher) registerHotkey();
+    if (partial.launcher || partial.voice) registerHotkey();
     broadcastSettings();
     return s;
   });
@@ -1317,6 +2035,8 @@ app.whenReady().then(() => {
 
   setupIpc();
   setupAskIpc();
+  setupConfirmIpc();
+  setupVoiceIpc();
   setupLauncherIpc();
   createCatWindow();
   startAgentServer();
@@ -1327,9 +2047,15 @@ app.whenReady().then(() => {
   tray.setToolTip('PixelPaw — your desktop cat');
   updateTray();
 
+  // wake-from-sleep: check for a return-from-away promptly (resume itself
+  // is not activity; the digest waits for the first real input)
+  try {
+    require('electron').powerMonitor.on('resume', () => checkAwayReturn());
+  } catch (e) { console.error('[powerMonitor]', e.message); }
+
   if (TEST) {
     // deterministic synthetic ticks instead of real cursor polling
-    const testTick = { cursor: { x: WIN_W / 2, y: 60 }, vel: 0, idleSec: 0, dragging: false, huntPhase: 'none' };
+    const testTick = { cursor: { x: WIN_W / 2, y: 60 }, vel: 0, idleSec: 0, dragging: false, huntPhase: 'none', test: true };
     setInterval(() => { lastActivityT = Date.now(); send('tick', testTick); }, 32);
     catWin.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
@@ -1423,6 +2149,10 @@ app.whenReady().then(() => {
 app.on('window-all-closed', (e) => {
   // tray app: stay alive
   if (SMOKE) app.quit();
+});
+
+app.on('will-quit', () => {
+  transcribeLib.cleanupStale(); // stray voice recordings from crashes
 });
 
 // pixelpaw:// deep links (registration is a no-op until packaged on some setups)
