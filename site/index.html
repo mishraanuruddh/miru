@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PixelPaw — a small cat lives at the edge of your screen</title>
+  <meta name="description" content="PixelPaw is a desktop pixel cat for macOS. Say a thought out loud and it becomes a to-do, a note, or an answer. She watches your AI agents, reminds you gently, and never phones home." />
+  <meta property="og:title" content="PixelPaw — a small cat lives at the edge of your screen" />
+  <meta property="og:description" content="A living desktop companion. Voice notes, gentle reminders, agent-watching: all behind chips you confirm, all undoable." />
+  <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges"><rect width="16" height="16" fill="none"/><path fill="%23fdf8ec" d="M2 3h2v2H2zM12 3h2v2h-2zM2 5h12v8H2z"/><path fill="%2323212b" d="M3 4h1v1H3zM12 4h1v1h-1zM3 6h10v6H3z"/><path fill="%23f2a0b5" d="M7 8h2v1H7z"/><path fill="%23ffffff" d="M4 7h2v2H4zM10 7h2v2h-2z"/></svg>' />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400..900;1,400..900&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="site.css" />
+</head>
+<body>
+
+  <header class="top">
+    <a class="wordmark" href="#top" aria-label="PixelPaw — back to top">
+      <canvas id="markCat" width="48" height="48" aria-hidden="true"></canvas>
+      <span>PixelPaw</span>
+    </a>
+    <a class="btn btn-quiet" href="#home">Download</a>
+  </header>
+
+  <main id="top">
+
+    <!-- ============================================================ hero -->
+    <section class="hero" data-scene="hero" aria-labelledby="hero-h">
+      <h1 id="hero-h">A small cat lives<br />at the edge of<br />your screen.</h1>
+      <div class="hero-side">
+        <p class="lede">She's down there right now — dozing while you work, catching
+          the thoughts you say out loud, watching your agents so you don't
+          have&nbsp;to.</p>
+        <div class="cta-row">
+          <a class="btn btn-solid" href="#home">Download for macOS</a>
+          <a class="btn btn-ghost" href="#ten">Spend a night with her</a>
+        </div>
+        <p class="fineprint">Free &amp; open source · no accounts, no telemetry ·
+          rendered live on this page by her real engine, so go ahead: boop her.</p>
+      </div>
+    </section>
+
+    <!-- ====================================================== 10 PM -->
+    <section class="chapter" id="ten" data-scene="settle" aria-labelledby="ten-h">
+      <h2 id="ten-h"><time class="when" datetime="22:00">10 PM</time> She settles in.</h2>
+      <p class="chapter-lede">You're typing; she kneads along. You scroll; she paws at
+        the page rolling by. Stroke her head and she purrs. Ignore her completely and
+        she'll wash her face, wrap her tail around her paws, and doze off. She's a
+        cat, not a notification.</p>
+
+      <div class="poses" role="list">
+        <figure class="pose" role="listitem">
+          <canvas class="poseCat" data-pose="groom" width="300" height="240" aria-hidden="true"></canvas>
+          <figcaption>
+            <h3>Washes up when it's quiet</h3>
+            <p>Paw, ear, repeat. Catch her eye and she'll slow-blink at you.
+              Blink back; it means the same thing it means with a real cat.</p>
+          </figcaption>
+        </figure>
+        <figure class="pose" role="listitem">
+          <canvas class="poseCat" data-pose="dream" width="300" height="240" aria-hidden="true"></canvas>
+          <figcaption>
+            <h3>Dreams in fish</h3>
+            <p>Ears twitch mid-nap, every nap. Type like a maniac and she
+              overheats and steams. Leave, and she just sleeps.</p>
+          </figcaption>
+        </figure>
+        <figure class="pose" role="listitem">
+          <canvas class="poseCat" data-pose="gift" width="300" height="240" aria-hidden="true"></canvas>
+          <figcaption>
+            <h3>Leaves you presents</h3>
+            <p>A leaf. A bottle cap. Once, a beetle. Work beside her in the
+              evening and check her spot in the morning: twelve treasures, and
+              a shelf in her menu to keep them on.</p>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ==================================================== 11:52 PM -->
+    <section class="chapter chapter-voice" id="voice" data-scene="voice" aria-labelledby="voice-h">
+      <h2 id="voice-h"><time class="when" datetime="23:52">11:52 PM</time> You think out loud.</h2>
+      <p class="chapter-lede">Press <kbd>⌃⌥Space</kbd> and just say it. <em>“Remind me
+        to send the invoice at four.” “Note: pricing needs a floor.” “What's the flag
+        for force-with-lease?”</em> She works out what you meant, shows you chips, and
+        waits three seconds before doing anything at all. Watch her run one, down
+        there&nbsp;↘</p>
+
+      <ul class="quiet-list">
+        <li>
+          <h3>Reminders that come back</h3>
+          <p>The 4 PM reminder you ignored returns at 4:30 with choices
+            (<span class="chips-inline"><span>DONE</span><span>+30M</span><span>TONIGHT</span><span>DROP</span></span>),
+            and once more after that. Then she lets it be. She never nags.</p>
+        </li>
+        <li>
+          <h3>An evening wind-down</h3>
+          <p>Around 6:30 she offers to sweep whatever's left to tomorrow at nine.
+            One question, once per evening, only if something's actually due.</p>
+        </li>
+        <li>
+          <h3>Undo follows everything</h3>
+          <p>Every to-do, note, and capture leaves an eight-second
+            <span class="undo-pill">ADDED — TAP TO UNDO</span> bubble behind it.
+            Tap it and it never happened. Notes land as markdown in your folder.</p>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ======================================================= 2 AM -->
+    <section class="chapter chapter-dev" id="agents" data-scene="agents" aria-labelledby="agents-h">
+      <div class="dev-inner">
+        <h2 id="agents-h"><time class="when" datetime="02:00">2 AM</time> Your agents are still working.</h2>
+        <p class="chapter-lede">Claude Code in one terminal, Codex in another. She
+          wears a tiny LED so you can stop checking on them.</p>
+
+        <ul class="dev-list">
+          <li>
+            <h3><span class="led led-amber" aria-hidden="true"></span>Working</h3>
+            <p>An amber breath while an agent thinks. Hover it: who's running,
+              doing what, since when.</p>
+          </li>
+          <li>
+            <h3><span class="led led-green" aria-hidden="true"></span>Done</h3>
+            <p>One hop per finished turn. Background pipelines skip the party and
+              file straight into her inbox, so a bursty automation never gets loud.</p>
+          </li>
+          <li>
+            <h3><span class="led led-red" aria-hidden="true"></span>Needs you</h3>
+            <p>Agent questions arrive as chips on her. Click an answer and she
+              jumps to the right terminal tab and types it in for you.</p>
+          </li>
+          <li>
+            <h3><span class="led led-cream" aria-hidden="true"></span>Spoken to</h3>
+            <p><em>“Tell claude to run the tests.”</em> She finds the session, asks
+              you first, types it into the prompt, and leaves the Enter key to you.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ======================================================= 7 AM -->
+    <section class="chapter" id="morning" data-scene="morning" aria-labelledby="morning-h">
+      <h2 id="morning-h"><time class="when" datetime="07:00">7 AM</time> She's glad you're back.</h2>
+      <p class="chapter-lede">A good-morning with what's due today. Some days, a
+        treasure she found overnight, set neatly at her feet. And if you've been gone
+        a while, one bubble with everything you missed (<em>2 agent runs · 1 ask ·
+        1 due</em>) that opens her inbox when you tap it.</p>
+      <p class="vow-line">Weekends never break your streak. A week away doesn't earn
+        you a lecture. Coming back is always a happy thing.</p>
+    </section>
+
+    <!-- ======================================================= rules -->
+    <section class="chapter chapter-rules" id="rules" data-scene="rules" aria-labelledby="rules-h">
+      <h2 id="rules-h">House rules.</h2>
+      <p class="chapter-lede">A creature with a permanent spot on your screen has to
+        deserve it. Hers are non-negotiable:</p>
+      <dl class="principles">
+        <div><dt>She asks first.</dt><dd>Chips before anything happens. Typing into your terminal always takes a click. Nothing is ever auto-sent.</dd></div>
+        <div><dt>Undo follows everything.</dt><dd>Eight seconds to take it back: the to-do, the note, the capture. Tap and it never happened.</dd></div>
+        <div><dt>No guilt. Ever.</dt><dd>Missed reminders don't escalate; she stops asking after twice. Absence gets a reunion, not a report card.</dd></div>
+        <div><dt>Your machine, your words.</dt><dd>Voice is transcribed on-device. The optional brain has a daily cap with a visible meter. Notes are plain markdown files in your folder.</dd></div>
+        <div><dt>Nothing phones home.</dt><dd>There's no account to create and no telemetry to opt out of. She's a local process talking to herself on 127.0.0.1.</dd></div>
+        <div><dt>Readable to the last pixel.</dt><dd>Open source, and every frame of her is ASCII art in a single file. You can read her entire anatomy.</dd></div>
+      </dl>
+    </section>
+
+    <!-- ======================================================= install -->
+    <section class="chapter chapter-home" id="home" data-scene="rules" aria-labelledby="home-h">
+      <h2 id="home-h">Bring her home.</h2>
+      <p class="chapter-lede">The packaged app is on its way. Tonight she runs from
+        source in two minutes — the way she was raised.</p>
+
+      <div class="home-grid">
+        <div class="install">
+          <div class="install-step"><span class="step-n" aria-hidden="true">1</span>
+            <pre class="code" tabindex="0"><code>git clone https://github.com/anuruddh/pixelpaw
+cd pixelpaw &amp;&amp; npm install &amp;&amp; npm start</code></pre>
+          </div>
+          <div class="install-step"><span class="step-n" aria-hidden="true">2</span>
+            <p>Grant <strong>Accessibility</strong> (so she can feel you type) and
+              <strong>Microphone</strong> (the first time you press <kbd>⌃⌥Space</kbd>).
+              macOS asks; she explains why in plain language.</p>
+          </div>
+          <div class="install-step"><span class="step-n" aria-hidden="true">3</span>
+            <p>That's it. She appears in the corner, introduces herself, and starts
+              earning her spot.</p>
+          </div>
+          <p class="fineprint">macOS 13+ · Apple&nbsp;Silicon &amp; Intel · agents and
+            voice are optional; she's a whole cat without them</p>
+        </div>
+
+        <div class="gestures">
+          <h3>First gestures</h3>
+          <table>
+            <tbody>
+              <tr><th scope="row">Boop</th><td>click her nose</td></tr>
+              <tr><th scope="row">Pet</th><td>stroke her head with the cursor</td></tr>
+              <tr><th scope="row">Menu</th><td>hold her for a moment, or <kbd>⌃⌥C</kbd></td></tr>
+              <tr><th scope="row">Talk</th><td><kbd>⌃⌥Space</kbd>, say a sentence, go quiet</td></tr>
+              <tr><th scope="row">Hide</th><td>menu → hide · she leaves a note on how to call her back</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot" data-scene="sleep">
+    <p>She's asleep now. Scroll up quietly.</p>
+    <p class="foot-dim">Drawn entirely in code — no image assets. PixelPaw · © 2026</p>
+  </footer>
+
+  <!-- the resident: one cat, fixed to the edge of your screen, all night -->
+  <div class="dock">
+    <div class="lamp" aria-hidden="true"></div>
+    <div class="dock-inner">
+      <div class="say" id="dockSay" role="status" aria-live="polite" hidden></div>
+      <div class="panel demo-panel" id="dockPanel" hidden>
+        <div class="panel-title">ADD TO-DO?</div>
+        <div class="panel-body">SEND THE INVOICE @ 4PM</div>
+        <div class="panel-chips">
+          <span class="chip chip-primary">ADD<i class="chip-timer" id="dockTimer"></i></span>
+          <span class="chip">CANCEL</span>
+        </div>
+        <div class="panel-foot"><span>AUTO IN 3S</span><span class="chip chip-mini">DISMISS</span></div>
+      </div>
+      <canvas id="resident" width="240" height="190" role="button" tabindex="0"
+        aria-label="PixelPaw. She lives at the bottom edge of this page. Click or press Enter to boop her nose."></canvas>
+    </div>
+  </div>
+
+  <script src="vendor/sprites.js"></script>
+  <script src="vendor/gifts.js"></script>
+  <script src="site.js"></script>
+</body>
+</html>
