@@ -1270,6 +1270,10 @@ function murmurAppPath() {
 
 function triggerVoice() {
   if (TEST) { askCalls.push({ menuAction: 'voice' }); return; }
+  if (!murmurAppPath()) {
+    send('remind', { text: 'NO DICTATION APP SET — SETTINGS → LAUNCHER', kind: 'say' });
+    return;
+  }
   execFile('pgrep', ['-f', 'MurmurApp|Murmur.app'], (err) => {
     if (err) {
       // not running: launch it, tell the user to retry in a moment

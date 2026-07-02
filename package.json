@@ -2,7 +2,7 @@
   "name": "pixelpaw",
   "productName": "PixelPaw",
   "version": "1.0.0",
-  "description": "A pixel cat that lives on your desktop \u2014 reacts to your mouse, keyboard, and AI agents",
+  "description": "A pixel cat who lives on your macOS desktop — she reacts to you, remembers you, takes voice to-dos, and watches your AI agents. Every pixel drawn in code.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -11,6 +11,28 @@
     "test": "electron . --test /tmp/pixelpaw-test"
   },
   "license": "MIT",
+  "author": "Anuruddh Mishra",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anuruddh/pixelpaw.git"
+  },
+  "homepage": "https://github.com/anuruddh/pixelpaw#readme",
+  "bugs": {
+    "url": "https://github.com/anuruddh/pixelpaw/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "electron",
+    "desktop-pet",
+    "pixel-art",
+    "macos",
+    "claude-code",
+    "mcp",
+    "ai-agents",
+    "voice-assistant"
+  ],
   "dependencies": {
     "uiohook-napi": "^1.5.5"
   },

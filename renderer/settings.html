@@ -323,6 +323,14 @@
           <label class="toggle"><input type="checkbox" id="voiceEnabled" /><i></i> ENABLE VOICE <em>press, speak, done — she does the rest</em></label>
           <label class="toggle"><input type="checkbox" id="voiceHotkey" /><i></i> GLOBAL HOTKEY <em>⌃⌥Space toggles listening from anywhere</em></label>
           <p class="hint">Also in the cat's menu as TALK. Stop by pressing again, clicking the cat, or just going quiet.</p>
+          <label class="field">
+            <span>TRANSCRIBER CLI</span>
+            <input id="voiceMurmurCli" type="text" placeholder="/path/to/a-local-speech-to-text-cli" />
+          </label>
+          <p class="hint">Any local CLI that prints a transcript for an audio file works
+            (<code>cli transcribe --json file.wav</code>). whisper.cpp's <code>whisper-cli</code>
+            is auto-detected on PATH when a model path is set below.</p>
+          <label class="field"><span>WHISPER MODEL (GGML)</span><input id="voiceWhisperModel" type="text" placeholder="~/models/ggml-base.en.bin" /></label>
           <div class="statusline"><span class="hint" id="voiceAvail" style="flex:1">checking…</span></div>
         </div>
 

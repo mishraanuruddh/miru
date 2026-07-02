@@ -514,6 +514,16 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   $('voiceHotkey').addEventListener('change', () => save({ voice: { hotkey: $('voiceHotkey').checked } }));
   $('voiceNotesDir').value = v.notesDir || '~/notes';
   $('voiceNotesDir').addEventListener('input', () => save({ voice: { notesDir: $('voiceNotesDir').value } }));
+  $('voiceMurmurCli').value = v.murmurCli || '';
+  $('voiceMurmurCli').addEventListener('input', () => {
+    save({ voice: { murmurCli: $('voiceMurmurCli').value.trim() } });
+    refreshVoiceStatus();
+  });
+  $('voiceWhisperModel').value = v.whisperModel || '';
+  $('voiceWhisperModel').addEventListener('input', () => {
+    save({ voice: { whisperModel: $('voiceWhisperModel').value.trim() } });
+    refreshVoiceStatus();
+  });
   $('voiceAutoConfirm').value = ((v.autoConfirmMs == null ? 3000 : v.autoConfirmMs) / 1000);
   $('voiceAutoConfirm').addEventListener('change', () => {
     const s = Math.max(0, Math.min(10, Number($('voiceAutoConfirm').value) || 0));

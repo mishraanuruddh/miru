@@ -1,6 +1,14 @@
 'use strict';
 // Photo -> skin pipeline test: renders [photo | palette | resulting cat] rows
-// for each test photo so the mapping heuristics can be judged visually.
+// for each test photo so the "match my cat" heuristics can be judged visually.
+//
+// Fixtures (not shipped): /tmp/catphotos/<name>.bin — a big-endian uint32 w,
+// uint32 h header followed by raw RGBA bytes. From any image, e.g.:
+//   python3 -c "from PIL import Image; import struct, sys; \
+//     im = Image.open(sys.argv[1]).convert('RGBA'); \
+//     open('/tmp/catphotos/mycat.bin','wb').write( \
+//       struct.pack('>II', *im.size) + im.tobytes())" photo.jpg
+// Then: node tools/test-photo.js   ->   /tmp/pixelpaw-photo-test.png
 const fs = require('fs');
 const { encodePNG } = require('../lib/png');
 const { FRAMES, SKINS, drawCat } = require('../renderer/sprites');

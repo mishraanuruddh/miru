@@ -1,6 +1,17 @@
 node_modules/
+dist/
+out/
 .playwright-mcp/
+.impeccable/
+
+# images are code-generated in this repo; committed screenshots live in docs/
 *.jpeg
 *.png
+!docs/**
+
 .DS_Store
 *.log
+.env*
+.vscode/
+.idea/
+*.swp
