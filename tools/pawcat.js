@@ -59,6 +59,13 @@ async function main() {
       console.log(`agent ${agent}: ${state}.`);
       break;
     }
+    case 'talk': {
+      // with text: route it through the cat's brain; without: toggle listening
+      const text = rest.join(' ').trim();
+      const r = await post('/voice', text ? { text } : {});
+      console.log(JSON.stringify(r));
+      break;
+    }
     case 'menu': await post('/menu'); console.log('menu toggled.'); break;
     case 'show': await post('/show'); console.log('cat is out.'); break;
     case 'hide': await post('/hide'); console.log('cat is hiding.'); break;
@@ -79,6 +86,7 @@ usage:
   pawcat todo "task"              add to the cat's task list
   pawcat tasks                    list tasks
   pawcat agent <state> [--agent n]  thinking|done|alert|idle
+  pawcat talk ["utterance"]       route through the cat's brain (no text = listen)
   pawcat menu|show|hide           control the cat
   pawcat status                   full JSON state
   pawcat url "pixelpaw://..."     exercise a deep link

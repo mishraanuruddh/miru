@@ -23,6 +23,16 @@ function httpPost(port, urlPath, body) {
   });
 }
 
+function httpGet(port, urlPath) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port, path: urlPath }, (res) => {
+      let b = '';
+      res.on('data', (c) => (b += c));
+      res.on('end', () => resolve({ status: res.statusCode, body: b }));
+    }).on('error', reject);
+  });
+}
+
 async function waitFor(fn, what, timeoutMs = 4000, interval = 60) {
   const t0 = Date.now();
   let last;
@@ -37,6 +47,7 @@ async function waitFor(fn, what, timeoutMs = 4000, interval = 60) {
 async function runScenarios(ctx) {
   const { dir, catWin, send, store, pomControl, broadcastSettings, setTick, debug, mouse, port, askCalls } = ctx;
   const post = (p, body) => httpPost(port(), p, body);
+  const getStatus = async () => JSON.parse((await httpGet(port(), '/status')).body);
   fs.mkdirSync(dir, { recursive: true });
   const results = [];
   let shotIdx = 0;
@@ -51,6 +62,13 @@ async function runScenarios(ctx) {
 
   // pull a scheduled ritual forward (grooming, dreams, bleps, tilts, wraps)
   const poke = (what) => catWin.webContents.executeJavaScript(`window.__catPoke(${JSON.stringify(what)})`);
+
+  // click the center of a {x,y,w,h} box from __catDebug
+  const clickBox = (b) => {
+    const x = Math.round(b.x + b.w / 2), y = Math.round(b.y + b.h / 2);
+    mouse({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+    mouse({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+  };
 
   const scenario = async (name, fn) => {
     try {
@@ -371,9 +389,12 @@ async function runScenarios(ctx) {
     }, 'red LED visible');
     await cap('alert');
 
-    // hover the LED -> tooltip explains who needs what
-    mouse({ type: 'mouseMove', x: Math.round(d.ledBox.x + d.ledBox.w / 2), y: Math.round(d.ledBox.y + d.ledBox.h / 2) });
-    await waitFor(async () => (await debug()).ledHover === true, 'LED hover');
+    // hover the LED -> tooltip explains who needs what (re-send the move each
+    // poll: a real mouse twitch on the host machine would otherwise stomp it)
+    await waitFor(async () => {
+      mouse({ type: 'mouseMove', x: Math.round(d.ledBox.x + d.ledBox.w / 2), y: Math.round(d.ledBox.y + d.ledBox.h / 2) });
+      return (await debug()).ledHover === true;
+    }, 'LED hover');
     await cap('led-tooltip');
 
     // click the LED -> jumps to that session's terminal
@@ -466,7 +487,8 @@ async function runScenarios(ctx) {
       return x.menu && x.menu.page === 'root' ? x : null;
     }, 'menu opened via long-press', 3000);
     mouse({ type: 'mouseUp', x: cx, y: cy, button: 'left', clickCount: 1 });
-    assert(d.menu.labels.join(',').includes('Voice'), 'labels=' + d.menu.labels);
+    assert(d.menu.labels.join(',').includes('Talk') && d.menu.labels.join(',').includes('Dictate'),
+      'labels=' + d.menu.labels);
     assert(d.sinceBoopMs > 2000 || d.sinceBoopMs < 0 || true, 'no boop on long press'); // boop must not fire
     await waitFor(async () => (await debug()).menu.anim >= 1, 'spring settled');
     await cap('menu-root');
@@ -474,17 +496,28 @@ async function runScenarios(ctx) {
     assert(d2.mode === 'menu', `mode=${d2.mode}`);
   });
 
-  await scenario('paw menu: VOICE routes to murmur action and closes', async () => {
-    const d = await debug();
-    const b = d.menu.boxes[0];
-    const before = askCalls.length;
+  await scenario('paw menu: TALK and DICTATE route to their actions', async () => {
+    let d = await debug();
+    let b = d.menu.boxes[d.menu.labels.indexOf('Talk')];
+    let before = askCalls.length;
     mouse({ type: 'mouseMove', x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) });
     await wait(60);
-    mouse({ type: 'mouseDown', x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2), button: 'left', clickCount: 1 });
-    mouse({ type: 'mouseUp', x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2), button: 'left', clickCount: 1 });
-    await waitFor(() => askCalls.length > before, 'voice action routed');
+    clickBox(b);
+    await waitFor(() => askCalls.length > before, 'talk action routed');
+    assert(askCalls[askCalls.length - 1].menuAction === 'talk', JSON.stringify(askCalls[askCalls.length - 1]));
+    await waitFor(async () => (await debug()).menu === null, 'menu closed after talk');
+    // reopen and hit Dictate (the old Murmur ⌃⌥T path)
+    send('menu:toggle', {});
+    d = await waitFor(async () => {
+      const x = await debug();
+      return x.menu && x.menu.page === 'root' && x.menu.anim >= 1 ? x : null;
+    }, 'menu reopened');
+    b = d.menu.boxes[d.menu.labels.indexOf('Dictate')];
+    before = askCalls.length;
+    clickBox(b);
+    await waitFor(() => askCalls.length > before, 'dictate action routed');
     assert(askCalls[askCalls.length - 1].menuAction === 'voice', JSON.stringify(askCalls[askCalls.length - 1]));
-    await waitFor(async () => (await debug()).menu === null, 'menu closed after action');
+    await waitFor(async () => (await debug()).menu === null, 'menu closed after dictate');
   });
 
   await scenario('paw menu: apps page launches an app', async () => {
@@ -830,6 +863,95 @@ async function runScenarios(ctx) {
     assert(r.bond.streak === 0, 'weekday miss must reset streak: ' + r.bond.streak);
   });
 
+  await scenario('wind-down: evening sweep moves the day to tomorrow', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'TASK A @ +0m' });
+    await post('/todo', { text: 'TASK B @ +2m' });
+    // greeted satisfies the greeting-first gate; windDown:false keeps the
+    // evening armed; hour opts into the window (TEST is otherwise inert)
+    await post('/test/bond-roll', { day: '2099-03-03', activeYesterday: true, greeted: true, windDown: false, hour: '19:00' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'winddown' && x.confirm.boxes.length ? x : null;
+    }, 'wind-down panel', 8000);
+    assert(/2 LEFT TODAY/.test(d.confirm.text), d.confirm.text);
+    await cap('winddown');
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('sweep')]);
+    await waitFor(async () => ((await debug()).bubble || '').includes('SEE THEM AT 9AM'), 'sweep ack');
+    const s2 = await getStatus();
+    for (const t of s2.tasks) {
+      assert(new Date(t.due).getHours() === 9 && t.remindedAt === null, JSON.stringify(t));
+    }
+    assert(s2.windDownDay === '2099-03-03', 'marked: ' + s2.windDownDay);
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/test/bond-roll', { day: '2099-03-03', activeYesterday: true, greeted: true }); // defuse hour
+  });
+
+  await scenario('wind-down: keep tonight fires once; clean evenings are silent', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'EVENING TASK @ +0m' });
+    await post('/test/bond-roll', { day: '2099-03-04', activeYesterday: true, greeted: true, windDown: false, hour: '19:30' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'winddown' && x.confirm.boxes.length ? x : null;
+    }, 'panel', 8000);
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('keep')]);
+    await waitFor(async () => ((await debug()).bubble || '').includes('CHEERING'), 'keep ack');
+    const t = (await getStatus()).tasks[0];
+    assert(!t.done && t.due <= Date.now(), 'task must stay untouched');
+    await wait(3000);
+    assert(!(await debug()).confirm, 'must not re-fire the same day');
+    // a clean evening is silent (but still marked)
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/test/bond-roll', { day: '2099-03-05', activeYesterday: true, greeted: true, windDown: false, hour: '19:00' });
+    await wait(3000);
+    assert(!(await debug()).confirm, 'clean evening stays silent');
+    assert((await getStatus()).windDownDay === '2099-03-05', 'still marked');
+    await post('/test/bond-roll', { day: '2099-03-05', activeYesterday: true, greeted: true }); // defuse hour
+  });
+
+  await scenario('away digest: one bubble sums the while-you-were-out', async () => {
+    await catWin.webContents.executeJavaScript('window.pixelpaw.inboxClear()');
+    store.set({ tasks: [] });
+    broadcastSettings();
+    // seed: two background agent runs (codex hook without a tty = background
+    // -> guaranteed inbox entries of kind 'agent') + one due task
+    await post('/hook/codex/notify', { type: 'agent-turn-complete', 'last-assistant-message': 'built the thing' });
+    await post('/hook/codex/notify', { type: 'agent-turn-complete', 'last-assistant-message': 'shipped the other thing' });
+    await post('/todo', { text: 'CATCH UP @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: CATCH UP'), 'due fired');
+    await post('/test/away', { minutes: 130 });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return /WHILE YOU WERE OUT: 2 AGENT RUNS · 1 DUE/.test(x.bubble || '') && x.bubbleBox ? x : null;
+    }, 'digest bubble', 12000);
+    await cap('away-digest');
+    clickBox(d.bubbleBox);
+    await waitFor(async () => {
+      const x = await debug();
+      return x.menu && x.menu.page === 'inbox';
+    }, 'digest opens the inbox');
+    mouse({ type: 'mouseDown', x: 15, y: 15, button: 'left', clickCount: 1 });
+    mouse({ type: 'mouseUp', x: 15, y: 15, button: 'left', clickCount: 1 });
+    await waitFor(async () => (await debug()).menu === null, 'menu closed');
+    store.set({ tasks: [] });
+    broadcastSettings();
+  });
+
+  await scenario('away digest: the greeting lands first, digest follows', async () => {
+    await catWin.webContents.executeJavaScript('window.pixelpaw.inboxClear()');
+    await post('/hook/codex/notify', { type: 'agent-turn-complete', 'last-assistant-message': 'overnight batch done' });
+    await post('/test/bond-roll', { day: '2099-03-06', activeYesterday: true }); // NOT greeted: greeting armed
+    await post('/test/away', { minutes: 150 });
+    await waitFor(async () => ((await debug()).bubble || '').includes('MORNING'), 'greeting first', 8000);
+    await waitFor(async () => ((await debug()).bubble || '').includes('WHILE YOU WERE OUT'), 'digest second', 10000);
+    await post('/test/bond-roll', { day: '2099-03-06', activeYesterday: true, greeted: true }); // defuse
+  });
+
   await scenario('sleep and wake', async () => {
     // belt-and-braces cleanup so a prior failure can't block sleep
     await post('/hook/claude/ask-done', { session_id: 's1' });
@@ -839,7 +961,7 @@ async function runScenarios(ctx) {
     // un-greeted, and the morning greeting would otherwise fire mid-nap or
     // on wake and swallow the yawn
     await post('/test/bond-roll', { day: '2099-01-08', activeYesterday: true, greeted: true });
-    await waitFor(async () => !(await debug()).bubble, 'no pending bubble', 8000);
+    await waitFor(async () => !(await debug()).bubble, 'no pending bubble', 12000);
     // drowsy half-lidded eyes just before the nap — tucked into a loaf
     setTick({ idleSec: 235, vel: 0 });
     await waitFor(async () => (await debug()).eyeStyle === 'squint', 'drowsy eyes before sleep', 4000);
@@ -928,6 +1050,365 @@ async function runScenarios(ctx) {
       return x.blep && x.mouthStyle === 'mlem' ? x : null;
     }, 'blep tongue out', 3000);
     await cap('blep');
+  });
+
+  await scenario('confirm chips: render, click routes to the registry', async () => {
+    const before = askCalls.length;
+    const r = JSON.parse((await post('/test/confirm', {
+      kind: 'voice', title: 'ADD TO-DO?', text: 'BUY MILK @ 4PM',
+      chips: [{ id: 'confirm', label: 'ADD ✓' }, { id: 'cancel', label: 'CANCEL' }],
+    })).body);
+    assert(r.ok, 'showConfirm refused');
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.boxes.length === 2 ? x : null;
+    }, 'confirm panel with 2 chips');
+    assert(d.confirm.title === 'ADD TO-DO?', 'title: ' + d.confirm.title);
+    assert(d.confirm.autoRemainMs === null, 'no auto without autoConfirmMs');
+    await cap('confirm-panel');
+    clickBox(d.confirm.boxes[0]);
+    await waitFor(async () => askCalls.length > before, 'chip routed');
+    assert(askCalls[askCalls.length - 1].confirmChip === 'confirm', JSON.stringify(askCalls[askCalls.length - 1]));
+    await waitFor(async () => !(await debug()).confirm, 'panel cleared');
+  });
+
+  await scenario('confirm chips: auto-confirm countdown drains and fires', async () => {
+    const before = askCalls.length;
+    await post('/test/confirm', {
+      kind: 'voice', title: 'SAVE NOTE?', text: 'PRICING IDEA',
+      chips: [{ id: 'confirm', label: 'SAVE ✓' }, { id: 'cancel', label: 'CANCEL' }],
+      autoConfirmMs: 900,
+    });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.autoRemainMs != null ? x : null;
+    }, 'countdown live');
+    await cap('confirm-countdown');
+    await waitFor(async () => askCalls.length > before, 'auto-fired', 3000);
+    assert(askCalls[askCalls.length - 1].confirmChip === 'confirm', 'auto: ' + JSON.stringify(askCalls[askCalls.length - 1]));
+    await waitFor(async () => !(await debug()).confirm, 'panel cleared after auto');
+  });
+
+  await scenario('confirm chips: dismiss reports, ambient refuses while busy', async () => {
+    await post('/test/confirm', {
+      kind: 'voice', title: 'CAPTURE?', text: 'HELLO THERE',
+      chips: [{ id: 'confirm', label: 'SAVE' }, { id: 'cancel', label: 'CANCEL' }],
+    });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.dismissBox ? x : null;
+    }, 'panel drawn');
+    const r2 = JSON.parse((await post('/test/confirm', { kind: 'followup', title: 'X', text: 'Y' })).body);
+    assert(r2.ok === false, 'ambient kind should refuse while another confirm is live');
+    const before = askCalls.length;
+    clickBox(d.confirm.dismissBox);
+    await waitFor(async () => askCalls.length > before, 'dismiss routed');
+    assert(askCalls[askCalls.length - 1].confirmDismiss === 'click', JSON.stringify(askCalls[askCalls.length - 1]));
+    await waitFor(async () => !(await debug()).confirm, 'panel gone');
+  });
+
+  await scenario('brain fallback: utterances route to the right intents', async () => {
+    const route = async (text) => JSON.parse((await post('/test/voice-classify', { text })).body).route;
+    let r = await route('remind me to send the invoice at 4pm');
+    assert(r.intent === 'todo' && r.due === '4pm' && /send the invoice/i.test(r.text), JSON.stringify(r));
+    r = await route('todo buy milk in 30 minutes');
+    assert(r.intent === 'todo' && r.due === '+30m', JSON.stringify(r));
+    r = await route('note that the demo is on thursday');
+    assert(r.intent === 'note' && /demo/.test(r.text), JSON.stringify(r));
+    r = await route('open visual studio code');
+    assert(r.intent === 'open_app' && /visual studio code/i.test(r.app), JSON.stringify(r));
+    r = await route('tell claude to run the tests');
+    assert(r.intent === 'ask_agent' && r.agent === 'run the tests', JSON.stringify(r));
+    r = await route("what's the capital of france?");
+    assert(r.intent === 'other' && r.degraded === true, JSON.stringify(r));
+    // route source must be the deterministic fallback under TEST (no CLI calls)
+    assert(r.source === 'fallback', 'TEST must not shell out: ' + r.source);
+    const empty = JSON.parse((await post('/voice', {})).body);
+    assert(empty.ok === false, 'empty text should 400');
+  });
+
+  // every voice scenario starts from an idle pipeline (cascade barrier):
+  // dismiss any leftover panel, then outlast the 15s TEST expiry if needed
+  const voiceIdle = async () => {
+    const d0 = await debug();
+    if (d0.confirm && d0.confirm.dismissBox) {
+      clickBox(d0.confirm.dismissBox);
+      await wait(150);
+    }
+    await waitFor(async () => (await debug()).voicePhase === 'idle', 'voice pipeline idle', 18000);
+  };
+
+  await scenario('voice: spoken todo → chips → auto-add → tap-to-undo', async () => {
+    // test notes go into the harness dir before ANY voice activity
+    store.set({ voice: { autoConfirmMs: 700, notesDir: path.join(dir, 'notes') } });
+    broadcastSettings();
+    await voiceIdle();
+    const openBefore = (await debug()).tasksOpen;
+    const r = JSON.parse((await post('/voice', { text: 'remind me to buy oat milk at 4pm' })).body);
+    assert(r.ok && r.intent === 'todo', JSON.stringify(r));
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'voice' ? x : null;
+    }, 'voice confirm panel');
+    assert(d.confirm.title === 'ADD TO-DO?', d.confirm.title);
+    assert(/BUY OAT MILK @ 4PM/.test(d.confirm.text.toUpperCase()), d.confirm.text);
+    // second utterance while busy → 409
+    const busy = JSON.parse((await post('/voice', { text: 'note busy check' })).body);
+    assert(busy.ok === false && busy.error === 'busy', JSON.stringify(busy));
+    // auto-confirm fires, task lands, undo bubble offered
+    await waitFor(async () => (await debug()).tasksOpen === openBefore + 1, 'todo added', 4000);
+    const d2 = await waitFor(async () => {
+      const x = await debug();
+      return x.bubbleKind === 'undo' && x.bubbleBox ? x : null;
+    }, 'undo bubble drawn');
+    await cap('voice-added-undo');
+    clickBox(d2.bubbleBox);
+    await waitFor(async () => (await debug()).tasksOpen === openBefore, 'undo removed the task');
+  });
+
+  await scenario('voice: cancel chip discards the intent', async () => {
+    store.set({ voice: { autoConfirmMs: 0 } }); // explicit clicks only
+    broadcastSettings();
+    await voiceIdle();
+    const openBefore = (await debug()).tasksOpen;
+    await post('/voice', { text: 'remind me to do nothing at 9pm' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.boxes.length === 2 ? x : null;
+    }, 'panel up');
+    assert(d.confirm.autoRemainMs === null, 'autoConfirmMs 0 must mean no countdown');
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('cancel')]);
+    await waitFor(async () => !(await debug()).confirm, 'panel gone');
+    await voiceIdle();
+    await wait(300);
+    assert((await debug()).tasksOpen === openBefore, 'no task should be added');
+  });
+
+  await scenario('voice: note appends to the daily file, undo truncates', async () => {
+    const notesDir = path.join(dir, 'notes');
+    store.set({ voice: { notesDir, autoConfirmMs: 600 } });
+    broadcastSettings();
+    await voiceIdle();
+    await post('/voice', { text: 'note that the pricing idea is per seat with a floor' });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.title === 'SAVE NOTE?' ? x : null;
+    }, 'note confirm');
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.bubbleKind === 'undo' && x.bubbleBox ? x : null;
+    }, 'note saved, undo bubble drawn', 4000);
+    const day = new Date();
+    const file = path.join(notesDir,
+      day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' + String(day.getDate()).padStart(2, '0') + '.md');
+    const body = fs.readFileSync(file, 'utf8');
+    assert(/pricing idea is per seat/.test(body), 'note not in file: ' + body);
+    clickBox(d.bubbleBox);
+    await waitFor(async () => {
+      const b = fs.readFileSync(file, 'utf8');
+      return !/pricing idea/.test(b);
+    }, 'undo truncated the note');
+  });
+
+  await scenario('voice: open app routes through the spy', async () => {
+    store.set({ voice: { autoConfirmMs: 0 } }); // deterministic explicit click
+    broadcastSettings();
+    await voiceIdle();
+    const before = askCalls.length;
+    await post('/voice', { text: 'open visual studio code' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && /^OPEN/.test(x.confirm.title) && x.confirm.boxes.length >= 2 ? x : null;
+    }, 'open confirm drawn');
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('confirm')]);
+    await waitFor(async () => askCalls.length > before, 'open routed');
+    const call = askCalls[askCalls.length - 1];
+    assert(/visual studio code/i.test(call.voiceOpen || ''), JSON.stringify(call));
+  });
+
+  await scenario('voice: offline question is captured, not guessed', async () => {
+    await voiceIdle();
+    const inboxBefore = (await debug()).inboxCount;
+    const r = JSON.parse((await post('/voice', { text: 'what is the flag for git force with lease?' })).body);
+    assert(r.intent === 'captured', JSON.stringify(r));
+    await waitFor(async () => ((await debug()).bubble || '').includes('BRAIN OFFLINE'), 'offline bubble');
+    assert((await debug()).inboxCount === inboxBefore + 1, 'captured to inbox');
+    await waitFor(async () => !(await debug()).confirm, 'no panel for captures');
+  });
+
+  await scenario('voice: quick answer bubbles up via injected route', async () => {
+    await voiceIdle();
+    const inboxBefore = (await debug()).inboxCount;
+    await post('/test/voice-route', { route: { intent: 'quick_answer', text: 'test q', answer: 'FORTY-TWO' } });
+    await waitFor(async () => ((await debug()).bubble || '').includes('FORTY-TWO'), 'answer bubble');
+    assert((await debug()).inboxCount === inboxBefore + 1, 'answer archived to inbox');
+  });
+
+  await scenario('voice: agent command needs a live session and an explicit click', async () => {
+    await voiceIdle();
+    await post('/test/sessions-clear', {}); // leftover sessions from earlier scenarios
+    // no sessions: captured
+    const r0 = JSON.parse((await post('/voice', { text: 'tell claude to run the tests' })).body);
+    assert(r0.intent === 'ask_agent', JSON.stringify(r0));
+    await waitFor(async () => ((await debug()).bubble || '').includes('NO LIVE AGENT'), 'no-agent capture');
+    // live session: explicit chips, never auto
+    await post('/hook/claude/prompt?tty=ttys042', { session_id: 'vs1', cwd: '/tmp/proj' });
+    await post('/voice', { text: 'tell claude to fix the failing palette test' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && /TYPE INTO/.test(x.confirm.title) ? x : null;
+    }, 'type-into confirm');
+    assert(d.confirm.autoRemainMs === null, 'agent typing must never auto-confirm');
+    await wait(1200);
+    assert((await debug()).confirm, 'panel must still be waiting after 1.2s');
+    await cap('voice-agent-confirm');
+    const before = askCalls.length;
+    const d2 = await debug();
+    clickBox(d2.confirm.boxes[d2.confirm.chipIds.indexOf('confirm')]);
+    await waitFor(async () => askCalls.length > before, 'typed');
+    const call = askCalls[askCalls.length - 1];
+    assert(call.voiceType && call.voiceType.tty === 'ttys042' &&
+      call.voiceType.text === 'fix the failing palette test' && call.voiceType.enter === false,
+      JSON.stringify(call));
+    await post('/hook/claude/end', { session_id: 'vs1' });
+  });
+
+  await scenario('voice: listening pose, REC pill, thinking dots (visual states)', async () => {
+    await post('/test/voice-phase', { phase: 'listening' });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.mode === 'listen' && x.frame === 'sit_tail_up' ? x : null;
+    }, 'listen mode + ears-up frame');
+    await cap('voice-listening');
+    await post('/test/voice-phase', { phase: 'transcribing' });
+    await wait(300);
+    await cap('voice-thinking');
+    await post('/test/voice-phase', { phase: 'idle' });
+    await waitFor(async () => (await debug()).mode !== 'listen', 'back from listen');
+  });
+
+  await scenario('follow-ups: a slipped reminder comes back with chips', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'SEND THE INVOICE @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: SEND THE INVOICE'), 'due fired');
+    let task = (await getStatus()).tasks[0];
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'followup' && x.confirm.boxes.length >= 3 ? x : null;
+    }, 'follow-up chips', 9000);
+    assert(d.confirm.title === 'YOUR NOTE', d.confirm.title);
+    assert(d.confirm.chips.includes('DONE') && d.confirm.chips.includes('+30M') && d.confirm.chips.includes('DROP'),
+      d.confirm.chips.join(','));
+    await cap('followup-chips');
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('snooze30')]);
+    await waitFor(async () => !(await debug()).confirm, 'panel acted');
+    task = (await getStatus()).tasks[0];
+    assert(task.remindedAt === null && task.followUps === 0, JSON.stringify(task));
+    const mins = (task.due - Date.now()) / 60000;
+    assert(mins > 28 && mins < 31, 'due should be ~30m out: ' + mins.toFixed(1));
+  });
+
+  await scenario('follow-ups: DONE completes with bond xp, then rests', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'WATER THE PLANT @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: WATER THE PLANT'), 'due fired');
+    const task = (await getStatus()).tasks[0];
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'followup' && x.confirm.boxes.length ? x : null;
+    }, 'chips', 9000);
+    const xpBefore = (await getStatus()).bond.xp;
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('done')]);
+    await waitFor(async () => ((await debug()).bubble || '').includes('NICE ONE'), 'praise bubble');
+    const s2 = await getStatus();
+    assert(s2.tasks[0].done === true, 'task should be done');
+    assert(s2.bond.xp >= xpBefore + 5, 'bond xp: ' + xpBefore + ' -> ' + s2.bond.xp);
+    await post('/test/task-clock', { id: task.id, rewindMs: 40 * 60000 });
+    await wait(2600);
+    assert(!(await debug()).confirm, 'done tasks never re-nag');
+  });
+
+  await scenario('follow-ups: second nudge offers tomorrow, cycle resets', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'FILE THE REPORT @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: FILE THE REPORT'), 'due fired');
+    const task = (await getStatus()).tasks[0];
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    let d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'followup' && x.confirm.dismissBox ? x : null;
+    }, '1st nudge', 9000);
+    clickBox(d.confirm.dismissBox);
+    await waitFor(async () => !(await debug()).confirm, '1st dismissed');
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.title === 'NO RUSH' && x.confirm.boxes.length ? x : null;
+    }, '2nd nudge says NO RUSH', 9000);
+    await cap('followup-2nd');
+    clickBox(d.confirm.boxes[d.confirm.chipIds.indexOf('tomorrow')]);
+    await waitFor(async () => !(await debug()).confirm, '2nd acted');
+    const t2 = (await getStatus()).tasks[0];
+    assert(t2.followUps === 0 && t2.remindedAt === null, JSON.stringify(t2));
+    assert(new Date(t2.due).getHours() === 9, 'tomorrow 9am, got ' + new Date(t2.due));
+  });
+
+  await scenario('follow-ups: exhausted tasks rest amber; DROP leaves a trail', async () => {
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'OLD CHORE @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: OLD CHORE'), 'due fired');
+    const task = (await getStatus()).tasks[0];
+    for (let nudge = 0; nudge < 2; nudge++) {
+      await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+      const d = await waitFor(async () => {
+        const x = await debug();
+        return x.confirm && x.confirm.dismissBox ? x : null;
+      }, 'nudge ' + (nudge + 1), 14000);
+      clickBox(d.confirm.dismissBox);
+      await waitFor(async () => !(await debug()).confirm, 'dismissed ' + (nudge + 1));
+    }
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    await wait(2600);
+    assert(!(await debug()).confirm, 'exhausted task must rest');
+    assert((await getStatus()).tasks[0].followUps === 2, 'followUps at cap');
+    // DROP on a fresh task
+    await post('/todo', { text: 'DROP ME @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: DROP ME'), 'due fired 2');
+    const t2 = (await getStatus()).tasks.find((t) => /DROP ME/.test(t.text));
+    await post('/test/task-clock', { id: t2.id, rewindMs: 31 * 60000 });
+    const d2 = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.chipIds && x.confirm.chipIds.includes('drop') && x.confirm.boxes.length ? x : null;
+    }, 'chips for drop', 9000);
+    const inboxBefore = (await debug()).inboxCount;
+    clickBox(d2.confirm.boxes[d2.confirm.chipIds.indexOf('drop')]);
+    await waitFor(async () => (await debug()).inboxCount === inboxBefore + 1, 'drop trail in inbox');
+    assert(!(await getStatus()).tasks.some((t) => /DROP ME/.test(t.text)), 'task removed');
+  });
+
+  await scenario('follow-ups: completing elsewhere melts the pending chips', async () => {
+    const pre = await debug();
+    if (pre.confirm && pre.confirm.dismissBox) { clickBox(pre.confirm.dismissBox); await wait(250); }
+    store.set({ tasks: [] });
+    broadcastSettings();
+    await post('/todo', { text: 'SIDE QUEST @ +0m' });
+    await waitFor(async () => ((await debug()).bubble || '').includes('DUE: SIDE QUEST'), 'due fired');
+    const task = (await getStatus()).tasks[0];
+    await post('/test/task-clock', { id: task.id, rewindMs: 31 * 60000 });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.kind === 'followup' && /SIDE QUEST/.test(x.confirm.text || '');
+    }, 'chips up', 14000);
+    await catWin.webContents.executeJavaScript(`window.pixelpaw.tasksToggle(${JSON.stringify(task.id)})`);
+    await waitFor(async () => !(await debug()).confirm, 'panel melted by completion');
+    store.set({ tasks: [] }); // leave no reminded tasks behind for later scenarios
+    broadcastSettings();
   });
 
   await scenario('sprite styles: kawaii default, classic backup switches', async () => {
