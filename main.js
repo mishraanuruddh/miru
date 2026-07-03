@@ -19,11 +19,11 @@ const transcribeLib = require('./lib/transcribe');
 const SMOKE = process.argv.includes('--smoke');
 const SHOT = (() => {
   const i = process.argv.indexOf('--shot');
-  return i >= 0 ? (process.argv[i + 1] || '/tmp/pixelpaw-shots') : null;
+  return i >= 0 ? (process.argv[i + 1] || '/tmp/miru-shots') : null;
 })();
 const TEST = (() => {
   const i = process.argv.indexOf('--test');
-  return i >= 0 ? (process.argv[i + 1] || '/tmp/pixelpaw-test') : null;
+  return i >= 0 ? (process.argv[i + 1] || '/tmp/miru-test') : null;
 })();
 const HARNESS = SMOKE || SHOT || TEST;
 const WIN_W = 380;
@@ -33,8 +33,18 @@ const WIN_H = 430;
 // lock, so they never disturb (or get blocked by) the user's running cat
 if (HARNESS) {
   app.setPath('userData', require('path').join(
-    require('os').tmpdir(), 'pixelpaw-harness-' + process.pid
+    require('os').tmpdir(), 'miru-harness-' + process.pid
   ));
+} else {
+  // first boot after the rename: adopt settings from the old PixelPaw data dir
+  try {
+    const ud = app.getPath('userData');
+    const legacy = path.join(path.dirname(ud), 'PixelPaw');
+    if (!fs.existsSync(path.join(ud, 'settings.json')) &&
+        fs.existsSync(path.join(legacy, 'settings.json'))) {
+      fs.cpSync(legacy, ud, { recursive: true });
+    }
+  } catch (e) {}
 }
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -117,7 +127,7 @@ function openSettings() {
   if (setWin && !setWin.isDestroyed()) { setWin.show(); setWin.focus(); return; }
   setWin = new BrowserWindow({
     width: 840, height: 620, minWidth: 720, minHeight: 520,
-    title: 'PixelPaw Settings', show: !SMOKE,
+    title: 'Miru Settings', show: !SMOKE,
     backgroundColor: '#101014',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -516,7 +526,7 @@ function startAgentServer() {
       const u = new URL(req.url, 'http://127.0.0.1');
       const p = u.pathname;
       if (req.method === 'GET' && p === '/health') {
-        return done(200, { ok: true, app: 'pixelpaw', version: app.getVersion() });
+        return done(200, { ok: true, app: 'miru', version: app.getVersion() });
       }
       if (req.method === 'GET' && p === '/status') {
         return done(200, {
@@ -1338,11 +1348,11 @@ function setupLauncherIpc() {
   });
 }
 
-// pixelpaw:// deep links — Shortcuts, Raycast, browsers, any app
+// miru:// deep links — Shortcuts, Raycast, browsers, any app
 function handleDeepLink(url) {
   let u;
   try { u = new URL(String(url)); } catch { return { ok: false, error: 'bad url' }; }
-  if (u.protocol !== 'pixelpaw:') return { ok: false, error: 'wrong scheme' };
+  if (u.protocol !== 'miru:') return { ok: false, error: 'wrong scheme' };
   const cmd = (u.hostname || u.pathname.replace(/^\/+/, '')).toLowerCase();
   const text = (u.searchParams.get('text') || '').slice(0, 120);
   switch (cmd) {
@@ -1907,7 +1917,7 @@ function updateTray() {
     { type: 'separator' },
     { label: 'Settings…', click: () => openSettings() },
     { type: 'separator' },
-    { label: 'Quit PixelPaw', click: () => { app.isQuitting = true; app.quit(); } },
+    { label: 'Quit Miru', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
 }
@@ -2022,7 +2032,7 @@ function setupIpc() {
       { label: 'Stretch Now', click: () => send('stretch-now', {}) },
       { type: 'separator' },
       { label: 'Hide Cat', click: () => toggleCat() },
-      { label: 'Quit PixelPaw', click: () => { app.isQuitting = true; app.quit(); } },
+      { label: 'Quit Miru', click: () => { app.isQuitting = true; app.quit(); } },
     ]);
     menu.popup({ window: catWin });
   });
@@ -2048,7 +2058,7 @@ app.whenReady().then(() => {
   registerHotkey();
 
   tray = new Tray(buildTrayIcon());
-  tray.setToolTip('PixelPaw — your desktop cat');
+  tray.setToolTip('Miru — your desktop cat');
   updateTray();
 
   // wake-from-sleep: check for a return-from-away promptly (resume itself
@@ -2159,12 +2169,12 @@ app.on('will-quit', () => {
   transcribeLib.cleanupStale(); // stray voice recordings from crashes
 });
 
-// pixelpaw:// deep links (registration is a no-op until packaged on some setups)
+// miru:// deep links (registration is a no-op until packaged on some setups)
 app.on('open-url', (e, url) => {
   e.preventDefault();
   handleDeepLink(url);
 });
-try { app.setAsDefaultProtocolClient('pixelpaw'); } catch { /* dev mode */ }
+try { app.setAsDefaultProtocolClient('miru'); } catch { /* dev mode */ }
 
 process.on('uncaughtException', (e) => {
   console.error('[uncaught]', e);

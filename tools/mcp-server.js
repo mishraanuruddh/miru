@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 'use strict';
-// PixelPaw MCP server (stdio): lets Claude Code & friends drive the cat as
+// Miru MCP server (stdio): lets Claude Code & friends drive the cat as
 // native tools. Pure JSON-RPC over stdin/stdout, proxying the local HTTP API.
-const PORT = process.env.PIXELPAW_PORT || 41999;
+const PORT = process.env.MIRU_PORT || 41999;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 const TOOLS = [
@@ -94,7 +94,7 @@ async function handle(line) {
       reply(id, {
         protocolVersion: (params && params.protocolVersion) || '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'pixelpaw', version: '1.0.0' },
+        serverInfo: { name: 'miru', version: '1.0.0' },
       });
     } else if (method === 'notifications/initialized') {
       // notification: no response

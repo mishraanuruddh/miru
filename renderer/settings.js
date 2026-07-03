@@ -1,15 +1,15 @@
 'use strict';
-/* global Sprites, CatPalette, pixelpaw */
+/* global Sprites, CatPalette, miru */
 (async function () {
   const { framesFor, SKINS, drawCat } = Sprites;
   let FRAMES = framesFor('kawaii');
   const { skinFromImageData, paletteToSkin, capFaceOverrides } = CatPalette;
-  let settings = await pixelpaw.getSettings();
+  let settings = await miru.getSettings();
   FRAMES = framesFor(settings.spriteStyle);
-  let info = await pixelpaw.appInfo();
+  let info = await miru.appInfo();
 
   const $ = (id) => document.getElementById(id);
-  const save = (partial) => pixelpaw.setSettings(partial).then((s) => { settings = s; });
+  const save = (partial) => miru.setSettings(partial).then((s) => { settings = s; });
 
   // ------------------------------------------------------------------ tabs
   document.querySelectorAll('#nav button').forEach((b) => {
@@ -309,7 +309,7 @@
   $('volume').addEventListener('input', () => save({ sounds: { volume: $('volume').value / 100 } }));
 
   async function refreshPerm() {
-    info = await pixelpaw.appInfo();
+    info = await miru.appInfo();
     const el = $('permStatus');
     if (info.platform !== 'darwin' || (info.accessibility && info.uiohookOk)) {
       el.textContent = 'KEYBOARD & SCROLL: OK';
@@ -324,7 +324,7 @@
   }
   refreshPerm();
   setInterval(refreshPerm, 4000);
-  $('grantBtn').addEventListener('click', () => pixelpaw.requestAccessibility().then(refreshPerm));
+  $('grantBtn').addEventListener('click', () => miru.requestAccessibility().then(refreshPerm));
 
   // ----------------------------------------------------------------- breaks
   $('stretchEnabled').checked = settings.stretch.enabled;
@@ -344,12 +344,12 @@
   $('pomLoop').checked = settings.pomodoro.loop;
   $('pomLoop').addEventListener('change', () => save({ pomodoro: { loop: $('pomLoop').checked } }));
 
-  $('pomStart').addEventListener('click', () => pixelpaw.pomControl('start'));
-  $('pomPause').addEventListener('click', () => pixelpaw.pomControl('toggle-pause'));
-  $('pomSkip').addEventListener('click', () => pixelpaw.pomControl('skip'));
-  $('pomStop').addEventListener('click', () => pixelpaw.pomControl('stop'));
+  $('pomStart').addEventListener('click', () => miru.pomControl('start'));
+  $('pomPause').addEventListener('click', () => miru.pomControl('toggle-pause'));
+  $('pomSkip').addEventListener('click', () => miru.pomControl('skip'));
+  $('pomStop').addEventListener('click', () => miru.pomControl('stop'));
 
-  pixelpaw.onPom((p) => {
+  miru.onPom((p) => {
     const el = $('pomStatus');
     if (p.phase === 'off') {
       el.textContent = 'OFF';
@@ -432,10 +432,10 @@ curl -X POST http://127.0.0.1:${port}/agent \\
     $('apiExample').textContent = apiExample(port);
   }
   setPort(info.agentPort || settings.agent.port);
-  pixelpaw.onAgentPort((p) => setPort(p));
+  miru.onAgentPort((p) => setPort(p));
 
   async function refreshHooks() {
-    const s = await pixelpaw.hooksStatus();
+    const s = await miru.hooksStatus();
     const el = $('hooksStatus');
     if (s.installed) {
       el.textContent = 'HOOKS INSTALLED';
@@ -450,17 +450,17 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   }
   refreshHooks();
   $('hooksInstall').addEventListener('click', async () => {
-    const r = await pixelpaw.hooksInstall();
+    const r = await miru.hooksInstall();
     if (!r.ok) alert('Install failed: ' + r.error);
     refreshHooks();
   });
   $('hooksUninstall').addEventListener('click', async () => {
-    await pixelpaw.hooksUninstall();
+    await miru.hooksUninstall();
     refreshHooks();
   });
 
   async function refreshCodex() {
-    const s = await pixelpaw.codexStatus();
+    const s = await miru.codexStatus();
     const el = $('codexStatus');
     if (s.installed) {
       el.textContent = 'NOTIFY INSTALLED';
@@ -478,12 +478,12 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   }
   refreshCodex();
   $('codexInstall').addEventListener('click', async () => {
-    const r = await pixelpaw.codexInstall();
+    const r = await miru.codexInstall();
     if (r.error) alert(r.error);
     refreshCodex();
   });
   $('codexUninstall').addEventListener('click', async () => {
-    await pixelpaw.codexUninstall();
+    await miru.codexUninstall();
     refreshCodex();
   });
 
@@ -498,7 +498,7 @@ curl -X POST http://127.0.0.1:${port}/agent \\
 
   $('autoType').checked = settings.agent.autoType !== false;
   $('autoType').addEventListener('change', () => save({ agent: { autoType: $('autoType').checked } }));
-  $('askTestBtn').addEventListener('click', () => pixelpaw.askTest());
+  $('askTestBtn').addEventListener('click', () => miru.askTest());
 
   // --------------------------------------------------------------- launcher
   $('hotkeyEnabled').checked = settings.launcher.hotkey !== false;
@@ -544,7 +544,7 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   });
   async function refreshVoiceStatus() {
     try {
-      const s = await pixelpaw.voiceStatus();
+      const s = await miru.voiceStatus();
       const a = s.availability || {};
       $('voiceAvail').textContent =
         `transcriber: ${a.murmur ? 'murmur ✓' : a.whisper ? 'whisper ✓' : 'MISSING'} · brain: ${a.claude ? 'claude ✓' : 'offline (fallback router)'}`;
@@ -639,9 +639,9 @@ curl -X POST http://127.0.0.1:${port}/agent \\
       list.appendChild(div);
     }
   }
-  pixelpaw.getInbox().then(renderInbox);
-  pixelpaw.onInbox(renderInbox);
-  $('inboxClearBtn').addEventListener('click', () => { pixelpaw.inboxClear(); renderInbox([]); });
+  miru.getInbox().then(renderInbox);
+  miru.onInbox(renderInbox);
+  $('inboxClearBtn').addEventListener('click', () => { miru.inboxClear(); renderInbox([]); });
 
   // ------------------------------------------------------------------ about
   $('versionLine').textContent = 'v' + (info.version || '1.0.0');
@@ -649,7 +649,7 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   $('openAtLogin').addEventListener('change', () => save({ openAtLogin: $('openAtLogin').checked }));
   $('comnyangLink').addEventListener('click', (e) => e.preventDefault());
 
-  pixelpaw.onSettings((s) => { settings = s; });
+  miru.onSettings((s) => { settings = s; });
 
   window.__settingsReady = true;
 })();

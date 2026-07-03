@@ -1,4 +1,4 @@
-# Working on PixelPaw
+# Working on Miru
 
 A macOS Electron desktop pet, plain JavaScript, no build step. `main.js` is
 the entire main process; `renderer/cat.js` is her state machine; her whole

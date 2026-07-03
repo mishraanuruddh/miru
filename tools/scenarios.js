@@ -580,13 +580,13 @@ async function runScenarios(ctx) {
     await waitFor(async () => (await debug()).mode !== 'menu', 'mode left menu');
   });
 
-  await scenario('deep links: pixelpaw://todo and /menu endpoint', async () => {
+  await scenario('deep links: miru://todo and /menu endpoint', async () => {
     const before = (await debug()).tasksOpen;
-    const r = await post('/url', { url: 'pixelpaw://todo?text=FROM%20A%20DEEP%20LINK' });
+    const r = await post('/url', { url: 'miru://todo?text=FROM%20A%20DEEP%20LINK' });
     assert(JSON.parse(r.body).ok === true, 'deep link rejected: ' + r.body);
     await waitFor(async () => (await debug()).tasksOpen === before + 1, 'task added via deep link');
     const bad = JSON.parse((await post('/url', { url: 'https://evil.example/say?text=x' })).body);
-    assert(bad.ok === false, 'non-pixelpaw scheme must be rejected');
+    assert(bad.ok === false, 'non-miru scheme must be rejected');
     await post('/menu', {});
     await waitFor(async () => (await debug()).menu !== null, 'menu opened via endpoint');
     await post('/menu', {});
@@ -654,11 +654,11 @@ async function runScenarios(ctx) {
     await waitFor(async () => (await debug()).menu === null, 'menu closed');
   });
 
-  await scenario('pawcat CLI: say lands as a bubble', async () => {
+  await scenario('miru CLI: say lands as a bubble', async () => {
     const { execFile } = require('child_process');
     const out = await new Promise((resolve, reject) => {
-      execFile(process.execPath, ['tools/pawcat.js', 'say', 'HELLO FROM CLI'], {
-        env: { ...process.env, PIXELPAW_PORT: String(port()), ELECTRON_RUN_AS_NODE: '1' },
+      execFile(process.execPath, ['tools/miru.js', 'say', 'HELLO FROM CLI'], {
+        env: { ...process.env, MIRU_PORT: String(port()), ELECTRON_RUN_AS_NODE: '1' },
         cwd: require('path').join(__dirname, '..'),
       }, (err, stdout, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve(stdout)));
     });
@@ -670,7 +670,7 @@ async function runScenarios(ctx) {
     const { spawn } = require('child_process');
     const path = require('path');
     const child = spawn(process.execPath, [path.join(__dirname, 'mcp-server.js')], {
-      env: { ...process.env, PIXELPAW_PORT: String(port()), ELECTRON_RUN_AS_NODE: '1' },
+      env: { ...process.env, MIRU_PORT: String(port()), ELECTRON_RUN_AS_NODE: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const replies = [];
@@ -915,7 +915,7 @@ async function runScenarios(ctx) {
   });
 
   await scenario('away digest: one bubble sums the while-you-were-out', async () => {
-    await catWin.webContents.executeJavaScript('window.pixelpaw.inboxClear()');
+    await catWin.webContents.executeJavaScript('window.miru.inboxClear()');
     store.set({ tasks: [] });
     broadcastSettings();
     // seed: two background agent runs (codex hook without a tty = background
@@ -943,7 +943,7 @@ async function runScenarios(ctx) {
   });
 
   await scenario('away digest: the greeting lands first, digest follows', async () => {
-    await catWin.webContents.executeJavaScript('window.pixelpaw.inboxClear()');
+    await catWin.webContents.executeJavaScript('window.miru.inboxClear()');
     await post('/hook/codex/notify', { type: 'agent-turn-complete', 'last-assistant-message': 'overnight batch done' });
     await post('/test/bond-roll', { day: '2099-03-06', activeYesterday: true }); // NOT greeted: greeting armed
     await post('/test/away', { minutes: 150 });
@@ -1405,7 +1405,7 @@ async function runScenarios(ctx) {
       const x = await debug();
       return x.confirm && x.confirm.kind === 'followup' && /SIDE QUEST/.test(x.confirm.text || '');
     }, 'chips up', 14000);
-    await catWin.webContents.executeJavaScript(`window.pixelpaw.tasksToggle(${JSON.stringify(task.id)})`);
+    await catWin.webContents.executeJavaScript(`window.miru.tasksToggle(${JSON.stringify(task.id)})`);
     await waitFor(async () => !(await debug()).confirm, 'panel melted by completion');
     store.set({ tasks: [] }); // leave no reminded tasks behind for later scenarios
     broadcastSettings();

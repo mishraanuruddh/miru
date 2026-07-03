@@ -1,5 +1,5 @@
 'use strict';
-/* global Sprites, PixelFont, PixelIcons, CatGifts, CatAudio, pixelpaw */
+/* global Sprites, PixelFont, PixelIcons, CatGifts, CatAudio, miru */
 (async function () {
   const { framesFor, SKINS, drawCat } = Sprites;
   let FRAMES = framesFor('kawaii');
@@ -20,7 +20,7 @@
   window.addEventListener('resize', sizeCanvas);
 
   // ------------------------------------------------------------- settings
-  let settings = await pixelpaw.getSettings();
+  let settings = await miru.getSettings();
   let skin = resolveSkin();
   FRAMES = framesFor(settings.spriteStyle);
 
@@ -37,7 +37,7 @@
   }
   applySound();
 
-  pixelpaw.onSettings((s) => {
+  miru.onSettings((s) => {
     settings = s;
     skin = resolveSkin();
     FRAMES = framesFor(settings.spriteStyle);
@@ -116,7 +116,7 @@
   };
 
   // ----------------------------------------------------------- ipc wiring
-  pixelpaw.onTick((t) => {
+  miru.onTick((t) => {
     st.cursor = t.cursor;
     st.vel = t.vel;
     st.idleSec = t.idleSec;
@@ -125,17 +125,17 @@
     updateInteractive(t.cursor.x, t.cursor.y);
   });
 
-  pixelpaw.onKey(({ kps }) => {
+  miru.onKey(({ kps }) => {
     st.kps = kps;
     st.lastKeyT = now();
   });
 
-  pixelpaw.onScroll(({ amount }) => {
+  miru.onScroll(({ amount }) => {
     st.lastScrollT = now();
     st.scrollLen = Math.min(70, st.scrollLen + amount * 2);
   });
 
-  pixelpaw.onHunt(({ phase, dir }) => {
+  miru.onHunt(({ phase, dir }) => {
     st.hunt.phase = phase;
     if (dir) st.hunt.dir = dir;
     if (phase === 'caught') {
@@ -144,7 +144,7 @@
     }
   });
 
-  pixelpaw.onDrag((d) => {
+  miru.onDrag((d) => {
     if (d.phase === 'start') {
       st.drag.active = true;
       st.drag.releasedT = -1e9;
@@ -157,9 +157,9 @@
     }
   });
 
-  pixelpaw.onAgents((a) => { st.agents = a || { working: 0, alert: 0, details: [] }; });
+  miru.onAgents((a) => { st.agents = a || { working: 0, alert: 0, details: [] }; });
 
-  pixelpaw.onAgentDone(({ agent, quiet, silent }) => {
+  miru.onAgentDone(({ agent, quiet, silent }) => {
     st.doneFlashUntil = now() + 2500;
     if (silent) return; // burst-limited: LED flash + inbox only
     if (quiet) {
@@ -170,13 +170,13 @@
     }
   });
 
-  pixelpaw.onAgentAlert(({ agent, message }) => {
+  miru.onAgentAlert(({ agent, message }) => {
     st.alertUntil = now() + 8000;
     showBubble(String(message || `${agent} NEEDS YOU!`).toUpperCase(), 8000);
     CatAudio.alert();
   });
 
-  pixelpaw.onAsk((q) => {
+  miru.onAsk((q) => {
     st.question = { ...q, status: 'idle', hover: -1, boxes: [], openBox: null, dismissBox: null, panelBox: null };
     st.bubble = null;
     st.alertUntil = -1e9;
@@ -184,9 +184,9 @@
     CatAudio.alert();
   });
 
-  pixelpaw.onAskClear(() => { st.question = null; });
+  miru.onAskClear(() => { st.question = null; });
 
-  pixelpaw.onConfirm((c) => {
+  miru.onConfirm((c) => {
     st.confirm = {
       ...c,
       autoAt: c.autoConfirmMs ? now() + c.autoConfirmMs : null,
@@ -197,11 +197,11 @@
     st.bubble = null;
     CatAudio.pop();
   });
-  pixelpaw.onConfirmClear(({ cid }) => {
+  miru.onConfirmClear(({ cid }) => {
     if (st.confirm && st.confirm.cid === cid) st.confirm = null;
   });
 
-  pixelpaw.onVoiceState((v) => {
+  miru.onVoiceState((v) => {
     st.voice.phase = v.phase;
     if (v.vid) st.voice.vid = v.vid;
     if (v.maxMs) st.voice.maxMs = v.maxMs;
@@ -209,7 +209,7 @@
     if (v.phase === 'idle') st.voice.cancelBox = null;
   });
 
-  pixelpaw.onVoiceCapture(async (c) => {
+  miru.onVoiceCapture(async (c) => {
     if (c.cmd === 'start') {
       if (st.menu.open) closeMenu();
       st.voice.vid = c.vid;
@@ -220,9 +220,9 @@
           silenceMs: c.silenceMs,
           onAutoStop: () => finishCapture(c.vid),
         });
-        pixelpaw.voiceCaptureState({ vid: c.vid, ok: true });
+        miru.voiceCaptureState({ vid: c.vid, ok: true });
       } catch (e) {
-        pixelpaw.voiceCaptureState({ vid: c.vid, ok: false, error: e.name || e.message });
+        miru.voiceCaptureState({ vid: c.vid, ok: false, error: e.name || e.message });
       }
     } else if (c.cmd === 'stop') {
       finishCapture(c.vid);
@@ -237,26 +237,26 @@
     finishingCapture = true;
     try {
       const r = VoiceCapture.stop();
-      pixelpaw.voiceAudio(vid, r.wav, { durationS: r.durationS, speechSeen: r.speechSeen });
+      miru.voiceAudio(vid, r.wav, { durationS: r.durationS, speechSeen: r.speechSeen });
     } finally {
       finishingCapture = false;
     }
   }
-  pixelpaw.onVoiceDone(({ message, undoToken, undoMs }) => {
+  miru.onVoiceDone(({ message, undoToken, undoMs }) => {
     showBubble(String(message || 'DONE'), undoMs || 5000, undoToken ? 'undo' : 'say');
     if (undoToken && st.bubble) st.bubble.undoToken = undoToken;
     st.hopUntil = now() + 700;
   });
 
-  pixelpaw.onInbox((items) => {
+  miru.onInbox((items) => {
     st.inbox = items || [];
     if (st.menu.open && panelEl && st.menu.page === 'inbox') renderMenuDom();
   });
 
-  pixelpaw.onBond((b) => { st.bond = b; });
-  pixelpaw.getBond().then((b) => { st.bond = b; });
+  miru.onBond((b) => { st.bond = b; });
+  miru.getBond().then((b) => { st.bond = b; });
 
-  pixelpaw.onRitual(({ kind, name, dueToday, daysTogether, milestone }) => {
+  miru.onRitual(({ kind, name, dueToday, daysTogether, milestone }) => {
     const nm = name ? ', ' + name.toUpperCase() : '';
     if (milestone) {
       celebrate(`${milestone} DAYS TOGETHER${nm}!`, 4000);
@@ -271,25 +271,25 @@
     }
   });
 
-  pixelpaw.onGift(({ id, name, rarity }) => {
+  miru.onGift(({ id, name, rarity }) => {
     st.shownGift = { id, until: now() + 120000 };
     showBubble(`I CAUGHT THIS FOR YOU! ${name.toUpperCase()}${rarity === 'rare' ? ' (RARE!)' : ''}`, 9000);
     CatAudio.tada();
     spawnSparkles(rarity === 'rare' ? 14 : 6);
     st.hopUntil = now() + 1200;
   });
-  pixelpaw.getInbox().then((items) => { st.inbox = items || []; });
-  pixelpaw.onMenuToggle(() => toggleMenu());
+  miru.getInbox().then((items) => { st.inbox = items || []; });
+  miru.onMenuToggle(() => toggleMenu());
 
-  pixelpaw.onAskResult((r) => {
+  miru.onAskResult((r) => {
     if (!st.question || st.question.qid !== r.qid) return;
     if (r.typed) st.question.status = 'typed:' + (r.app || '');
     else if (r.located) st.question.status = 'focused:' + (r.app || '');
     else st.question.status = 'notfound';
   });
 
-  pixelpaw.onPom((p) => { st.pom = p; });
-  pixelpaw.onPomPhase(({ phase }) => {
+  miru.onPom((p) => { st.pom = p; });
+  miru.onPomPhase(({ phase }) => {
     const nm = nameSuffix();
     if (phase === 'break' || phase === 'long') {
       celebrate(`BREAK TIME${nm}!`, 3200);
@@ -299,13 +299,13 @@
     }
   });
 
-  pixelpaw.onRemind(({ text }) => {
+  miru.onRemind(({ text }) => {
     showBubble(String(text || '').toUpperCase(), 9000);
     CatAudio.meow();
     st.hopUntil = now() + 900;
   });
 
-  pixelpaw.onStretchNow((p) => {
+  miru.onStretchNow((p) => {
     const ms = (p && p.ms) || 11000;
     st.stretchUntil = now() + ms;
     showBubble(`STRETCH TIME${nameSuffix()}!`, Math.min(8000, ms));
@@ -371,7 +371,7 @@
     const want = st.drag.active || st.draggingEngaged || pointInteractive(x, y);
     if (want !== st.interactive) {
       st.interactive = want;
-      pixelpaw.setInteractive(want);
+      miru.setInteractive(want);
     }
   }
 
@@ -396,7 +396,7 @@
       if (d > 4) clearTimeout(st.longPressTimer);
       if (d > 7) {
         st.draggingEngaged = true;
-        pixelpaw.dragStart(st.mouseDown.x, st.mouseDown.y);
+        miru.dragStart(st.mouseDown.x, st.mouseDown.y);
       }
     }
 
@@ -436,11 +436,11 @@
     if (cf && inBox(X, Y, cf.panelBox)) {
       const hit = cf.boxes.find((b) => inBox(X, Y, b));
       if (hit) {
-        pixelpaw.confirmAction(cf.cid, hit.id);
+        miru.confirmAction(cf.cid, hit.id);
         st.confirm = null; // optimistic; main echoes confirm-clear
         CatAudio.pop();
       } else if (inBox(X, Y, cf.dismissBox)) {
-        pixelpaw.confirmDismiss(cf.cid, 'click');
+        miru.confirmDismiss(cf.cid, 'click');
         st.confirm = null;
         CatAudio.pop();
       }
@@ -453,13 +453,13 @@
       const opt = q.boxes.findIndex((b) => inBox(X, Y, b));
       if (opt >= 0 && q.canType && !q.status.startsWith('typed')) {
         q.status = 'sending';
-        pixelpaw.askAnswer(q.qid, opt);
+        miru.askAnswer(q.qid, opt);
         CatAudio.pop();
       } else if (inBox(X, Y, q.openBox)) {
-        pixelpaw.askOpen(q.qid);
+        miru.askOpen(q.qid);
         CatAudio.pop();
       } else if (inBox(X, Y, q.dismissBox)) {
-        pixelpaw.askDismiss(q.qid);
+        miru.askDismiss(q.qid);
         st.question = null;
         CatAudio.pop();
       }
@@ -467,13 +467,13 @@
     }
 
     if (inBox(X, Y, st.ledBox)) {
-      pixelpaw.ledClick();
+      miru.ledClick();
       CatAudio.pop();
       return;
     }
     if (st.bubble && inBox(X, Y, st.bubbleBox)) {
       if (st.bubble.kind === 'undo' && st.bubble.undoToken) {
-        pixelpaw.voiceUndo(st.bubble.undoToken);
+        miru.voiceUndo(st.bubble.undoToken);
         st.bubble = null;
         CatAudio.pop();
         return;
@@ -484,13 +484,13 @@
       return;
     }
     if (inBox(X, Y, st.chipBBox)) {
-      pixelpaw.pomControl('toggle-pause');
+      miru.pomControl('toggle-pause');
       CatAudio.pop();
       return;
     }
     if (st.voice.phase === 'listening') {
       if (inBox(X, Y, st.voice.cancelBox)) {
-        pixelpaw.voiceCancel(st.voice.vid);
+        miru.voiceCancel(st.voice.vid);
         VoiceCapture.cancel();
         CatAudio.pop();
         return;
@@ -515,7 +515,7 @@
   window.addEventListener('mouseup', () => {
     clearTimeout(st.longPressTimer);
     if (st.draggingEngaged) {
-      pixelpaw.dragEnd();
+      miru.dragEnd();
       st.draggingEngaged = false;
     } else if (st.mouseDown) {
       // boop!
@@ -524,7 +524,7 @@
       st.slowBlinkAt = now();
       CatAudio.pop();
       spawnHearts(1);
-      pixelpaw.bondEvent('boop');
+      miru.bondEvent('boop');
     }
     st.mouseDown = null;
   });
@@ -535,7 +535,7 @@
   });
 
   window.addEventListener('dblclick', (e) => {
-    if (pointInteractive(e.clientX, e.clientY)) pixelpaw.openSettings();
+    if (pointInteractive(e.clientX, e.clientY)) miru.openSettings();
   });
 
   document.addEventListener('mouseleave', () => updateInteractive(-99, -99));
@@ -580,7 +580,7 @@
     st.pet.meter = Math.max(0, st.pet.meter - dt * 55);
     const wasPetting = st.pet.active;
     st.pet.active = settings.reactions.pet && st.pet.meter > 45 && t - st.pet.lastStrokeT < 700;
-    if (st.pet.active && !wasPetting) { CatAudio.startPurr(); pixelpaw.bondEvent('pet'); }
+    if (st.pet.active && !wasPetting) { CatAudio.startPurr(); miru.bondEvent('pet'); }
     if (!st.pet.active && wasPetting) CatAudio.stopPurr();
     // deeper bond = more hearts when petting
     if (st.pet.active && Math.random() < dt * (1.6 + (st.bond.level || 1) * 0.6)) spawnHearts(1);
@@ -639,7 +639,7 @@
       if (pondering) cf.autoAt += dt * 1000;
       else if (t > cf.autoAt) {
         cf.autoFired = true;
-        if (cf.chips.some((ch) => ch.id === 'confirm')) pixelpaw.confirmAction(cf.cid, 'confirm');
+        if (cf.chips.some((ch) => ch.id === 'confirm')) miru.confirmAction(cf.cid, 'confirm');
       }
     }
 
@@ -1480,7 +1480,7 @@
     panelEl.appendChild(title);
 
     const goto = (page) => () => { st.menu.page = page; renderMenuDom(); };
-    const act = (a, close = true) => () => { pixelpaw.menuAction(a); if (close) closeMenu(); };
+    const act = (a, close = true) => () => { miru.menuAction(a); if (close) closeMenu(); };
     const tasks = settings.tasks || [];
     const open = tasks.filter((t) => !t.done);
 
@@ -1515,8 +1515,8 @@
           cls: 'task', check: !!t.done, done: t.done, label: t.text,
           chip: t.due ? (overdue ? 'snooze +10m' : fmtDue(t.due)) : null,
           chipCls: overdue ? 'overdue snooze' : '',
-          onChip: overdue ? () => pixelpaw.tasksSnooze(t.id) : null,
-          onClick: () => pixelpaw.tasksToggle(t.id),
+          onChip: overdue ? () => miru.tasksSnooze(t.id) : null,
+          onClick: () => miru.tasksToggle(t.id),
         }));
       }
       if (!shown.length) {
@@ -1530,7 +1530,7 @@
       const input = document.createElement('input');
       input.id = 'todoInput';
       input.placeholder = 'Add… e.g. review PR @ 16:30';
-      input.addEventListener('mousedown', (e) => { e.stopPropagation(); pixelpaw.setFocusable(true); setTimeout(() => input.focus(), 60); });
+      input.addEventListener('mousedown', (e) => { e.stopPropagation(); miru.setFocusable(true); setTimeout(() => input.focus(), 60); });
       input.addEventListener('keydown', (e) => {
         e.stopPropagation();
         st.menu.lastTouchT = now();
@@ -1541,7 +1541,7 @@
       const submit = () => {
         const v = input.value.trim();
         if (!v) return;
-        pixelpaw.tasksAdd(v);
+        miru.tasksAdd(v);
         input.value = '';
         CatAudio.pop();
       };
@@ -1550,7 +1550,7 @@
       bar.appendChild(btn);
       panelEl.appendChild(bar);
       if (tasks.some((t) => t.done)) {
-        panelEl.appendChild(row({ icon: 'check', label: 'Clear done', onClick: () => pixelpaw.tasksClearDone() }));
+        panelEl.appendChild(row({ icon: 'check', label: 'Clear done', onClick: () => miru.tasksClearDone() }));
       }
       panelEl.appendChild(sep());
       panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
@@ -1574,7 +1574,7 @@
         panelEl.appendChild(e);
       }
       if (items.length) {
-        panelEl.appendChild(row({ icon: 'check', label: 'Clear inbox', onClick: () => { pixelpaw.inboxClear(); st.menu.inboxExpanded = null; } }));
+        panelEl.appendChild(row({ icon: 'check', label: 'Clear inbox', onClick: () => { miru.inboxClear(); st.menu.inboxExpanded = null; } }));
       }
       panelEl.appendChild(sep());
       panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
@@ -1620,7 +1620,7 @@
       panelEl.appendChild(row({ icon: 'gear', label: 'Settings', onClick: act({ type: 'settings' }) }));
       panelEl.appendChild(row({ icon: 'rocket', label: 'Stretch now', onClick: act({ type: 'stretch' }) }));
       panelEl.appendChild(row({ icon: 'dot', label: 'Hide cat', onClick: act({ type: 'hide' }) }));
-      panelEl.appendChild(row({ icon: 'dot', label: 'Quit PixelPaw', onClick: act({ type: 'quit' }, false) }));
+      panelEl.appendChild(row({ icon: 'dot', label: 'Quit Miru', onClick: act({ type: 'quit' }, false) }));
       panelEl.appendChild(sep());
       panelEl.appendChild(row({ icon: 'back', label: 'Back', onClick: goto('root') }));
     }
@@ -1645,7 +1645,7 @@
     } else if (!m.open && panelEl) {
       panelEl.remove();
       panelEl = null;
-      pixelpaw.setFocusable(false);
+      miru.setFocusable(false);
     } else if (m.open && panelEl) {
       panelEl.classList.toggle('open', !m.closing);
     }
