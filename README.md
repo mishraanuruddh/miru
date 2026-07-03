@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="docs/wordmark.png" width="380"
-       alt="PixelPaw, written in pixel type, with the cat sitting at the end of the word" />
+  <img src="docs/wordmark.png" width="276"
+       alt="Miru, written in pixel type, with the cat sitting at the end of the word" />
 
   <p><em>A small cat lives at the edge of your screen.</em></p>
 
@@ -26,7 +26,7 @@
 
 <br />
 
-PixelPaw is a pixel cat who lives at the edge of your macOS screen. She watches
+Miru is a pixel cat who lives at the edge of your macOS screen. She watches
 your cursor, kneads while you type, and builds a real relationship over weeks:
 morning greetings, streaks with weekend grace, small gifts left overnight. She
 is also an ambient interface — press <kbd>⌃⌥Space</kbd> and a spoken thought
@@ -44,8 +44,8 @@ scratch.
 From clone to cat in about two minutes. Needs macOS 13+ and Node ≥ 22.12.
 
 ```bash
-git clone https://github.com/anuruddh/pixelpaw
-cd pixelpaw
+git clone https://github.com/mishraanuruddh/miru
+cd miru
 npm install   # one dependency, prebuilt for Apple Silicon and Intel
 npm start
 ```
@@ -229,9 +229,9 @@ non-negotiable:
 
 | Surface | Looks like |
 | --- | --- |
-| `pawcat` CLI | `pawcat todo "review the PR @ 3pm"` |
+| `miru` CLI | `miru todo "review the PR @ 3pm"` |
 | HTTP | `curl -X POST 127.0.0.1:41999/say -d '{"text":"DEPLOY DONE"}'` |
-| Deep links | `open "pixelpaw://say?text=hi"` — Shortcuts, Raycast, browsers |
+| Deep links | `open "miru://say?text=hi"` — Shortcuts, Raycast, browsers |
 | MCP | `cat_say` · `cat_todo` · `cat_list_tasks` · `cat_status` · `cat_voice` |
 
 All four proxy the same local API, which only ever binds to 127.0.0.1.
@@ -246,7 +246,7 @@ All four proxy the same local API, which only ever binds to 127.0.0.1.
 `/hook/claude/<prompt|stop|notification|ask|ask-done|end>` ·
 `/hook/codex/notify`
 
-Default port 41999; override with the `PIXELPAW_PORT` env var (CLI/MCP) and
+Default port 41999; override with the `MIRU_PORT` env var (CLI/MCP) and
 the port field in Settings → AI AGENTS (app).
 
 </details>
@@ -260,12 +260,12 @@ press the button in her settings, and both write a backup next to the file
 first.
 
 <details>
-<summary><b>pawcat</b> — talk to her from any terminal</summary>
+<summary><b>miru</b> — talk to her from any terminal</summary>
 
 1. From the repo root: `npm link`
-2. `pawcat say "deploy finished"` · `pawcat todo "standup @ 9:30"` ·
-   `pawcat talk "remind me to stretch at 5"` · `pawcat status`
-3. Remove any time with `npm unlink -g pixelpaw`.
+2. `miru say "deploy finished"` · `miru todo "standup @ 9:30"` ·
+   `miru talk "remind me to stretch at 5"` · `miru status`
+3. Remove any time with `npm unlink -g miru`.
 
 </details>
 
@@ -273,10 +273,10 @@ first.
 <summary><b>MCP</b> — let agents use her as native tools</summary>
 
 1. From the repo root:
-   `claude mcp add pixelpaw -s user -- node "$(pwd)/tools/mcp-server.js"`
-2. `claude mcp list` should show `pixelpaw`.
+   `claude mcp add miru -s user -- node "$(pwd)/tools/mcp-server.js"`
+2. `claude mcp list` should show `miru`.
 3. Agents now have `cat_say`, `cat_todo`, `cat_list_tasks`, `cat_status`,
-   and `cat_voice`. Remove with `claude mcp remove pixelpaw`.
+   and `cat_voice`. Remove with `claude mcp remove miru`.
 
 </details>
 
@@ -355,7 +355,7 @@ lib/
   store.js         settings and state, one JSON file
 tools/
   scenarios.js     the 66-scenario behavior suite
-  pawcat.js        the CLI
+  miru.js        the CLI
   mcp-server.js    MCP over stdio: hand-rolled JSON-RPC, zero dependencies
   preview.js       sprite contact sheets without opening the app
 site/              the landing page; the same sprite engine renders a living cat
@@ -381,7 +381,7 @@ calls, and fake agent events, asserting on her internal debug state at every
 step.
 
 Every scenario ends with a screenshot, so a full run leaves a reviewable
-film strip of every reaction in `/tmp/pixelpaw-test/`. Behavior changes are
+film strip of every reaction in `/tmp/miru-test/`. Behavior changes are
 judged by looking at her, not just at the assertions.
 
 ```text
@@ -406,7 +406,7 @@ stays hers.
 | Command | What it does |
 | --- | --- |
 | `npm start` | run her |
-| `npm test` | the 66-scenario suite, screenshots to `/tmp/pixelpaw-test/` |
+| `npm test` | the 66-scenario suite, screenshots to `/tmp/miru-test/` |
 | `npm run preview` | contact sheet of every sprite frame × skin, no app needed |
 | `npm run smoke` | boot + self-check |
 | `npx electron . --shot /tmp/shots` | capture seven labeled real states |
@@ -426,7 +426,7 @@ large, open an issue first so we can talk it over.
 
 [MIT](LICENSE).
 
-PixelPaw is an independent, from-scratch reimplementation inspired by
+Miru is an independent, from-scratch reimplementation inspired by
 [comnyang](https://comnyang.com/), the original desktop cat. If she makes
 you smile, go see the original; it is not affiliated with this project, and
 it deserves the visit.

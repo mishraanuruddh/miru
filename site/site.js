@@ -1,5 +1,5 @@
 'use strict';
-/* PixelPaw landing v2 — one resident cat lives fixed at the bottom edge of
+/* Miru landing v2 — one resident cat lives fixed at the bottom edge of
    the viewport (where she lives on a real desktop) and performs each chapter
    as it scrolls past: settling in, running a voice capture, watching agents,
    waking up with a gift, falling asleep at the footer. Every cat on this

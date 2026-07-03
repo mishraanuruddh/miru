@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 'use strict';
-// pawcat — talk to your desktop cat from any script or terminal.
-//   pawcat say "deploy finished"
-//   pawcat todo "review the PR"
-//   pawcat tasks
-//   pawcat done <task-id-prefix>
-//   pawcat agent thinking|done|alert [--agent codex]
-//   pawcat menu | show | hide | status
-const PORT = process.env.PIXELPAW_PORT || extractFlag('--port') || 41999;
+// miru — talk to your desktop cat from any script or terminal.
+//   miru say "deploy finished"
+//   miru todo "review the PR"
+//   miru tasks
+//   miru done <task-id-prefix>
+//   miru agent thinking|done|alert [--agent codex]
+//   miru menu | show | hide | status
+const PORT = process.env.MIRU_PORT || extractFlag('--port') || 41999;
 
 function extractFlag(name) {
   const i = process.argv.indexOf(name);
@@ -31,27 +31,27 @@ async function main() {
   switch (cmd) {
     case 'say': {
       const text = rest.join(' ');
-      if (!text) die('usage: pawcat say "message"');
+      if (!text) die('usage: miru say "message"');
       await post('/say', { text });
       console.log('the cat said it.');
       break;
     }
     case 'todo': {
       const text = rest.join(' ');
-      if (!text) die('usage: pawcat todo "task"');
+      if (!text) die('usage: miru todo "task"');
       const r = await post('/todo', { text });
       console.log(`added. ${r.tasks} task(s) on the cat.`);
       break;
     }
     case 'tasks': {
       const s = await (await fetch(base + '/status')).json();
-      if (!s.tasks.length) return console.log('no tasks. (pawcat todo "...")');
+      if (!s.tasks.length) return console.log('no tasks. (miru todo "...")');
       for (const t of s.tasks) console.log(`${t.done ? '[x]' : '[ ]'} ${t.id.slice(-5)}  ${t.text}`);
       break;
     }
     case 'agent': {
       const state = rest[0];
-      if (!['thinking', 'done', 'alert', 'idle'].includes(state)) die('usage: pawcat agent thinking|done|alert|idle [--agent name]');
+      if (!['thinking', 'done', 'alert', 'idle'].includes(state)) die('usage: miru agent thinking|done|alert|idle [--agent name]');
       const agentIdx = rest.indexOf('--agent');
       const agent = agentIdx >= 0 ? rest[agentIdx + 1] : 'script';
       // run from a real terminal = interactive; piped/cron = background (muted)
@@ -70,7 +70,7 @@ async function main() {
     case 'show': await post('/show'); console.log('cat is out.'); break;
     case 'hide': await post('/hide'); console.log('cat is hiding.'); break;
     case 'url': {
-      if (!rest[0]) die('usage: pawcat url "pixelpaw://say?text=hi"');
+      if (!rest[0]) die('usage: miru url "miru://say?text=hi"');
       console.log(JSON.stringify(await post('/url', { url: rest[0] })));
       break;
     }
@@ -80,20 +80,20 @@ async function main() {
       break;
     }
     default:
-      die(`pawcat — your desktop cat, scriptable
+      die(`miru — your desktop cat, scriptable
 usage:
-  pawcat say "message"            speech bubble + inbox
-  pawcat todo "task"              add to the cat's task list
-  pawcat tasks                    list tasks
-  pawcat agent <state> [--agent n]  thinking|done|alert|idle
-  pawcat talk ["utterance"]       route through the cat's brain (no text = listen)
-  pawcat menu|show|hide           control the cat
-  pawcat status                   full JSON state
-  pawcat url "pixelpaw://..."     exercise a deep link
-env: PIXELPAW_PORT (default 41999)`);
+  miru say "message"            speech bubble + inbox
+  miru todo "task"              add to the cat's task list
+  miru tasks                    list tasks
+  miru agent <state> [--agent n]  thinking|done|alert|idle
+  miru talk ["utterance"]       route through the cat's brain (no text = listen)
+  miru menu|show|hide           control the cat
+  miru status                   full JSON state
+  miru url "miru://..."     exercise a deep link
+env: MIRU_PORT (default 41999)`);
   }
 }
 
 function die(msg) { console.error(msg); process.exit(1); }
 
-main().catch((e) => die('cat unreachable at ' + base + ' — is PixelPaw running? (' + e.message + ')'));
+main().catch((e) => die('cat unreachable at ' + base + ' — is Miru running? (' + e.message + ')'));

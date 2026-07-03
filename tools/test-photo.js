@@ -8,7 +8,7 @@
 //     im = Image.open(sys.argv[1]).convert('RGBA'); \
 //     open('/tmp/catphotos/mycat.bin','wb').write( \
 //       struct.pack('>II', *im.size) + im.tobytes())" photo.jpg
-// Then: node tools/test-photo.js   ->   /tmp/pixelpaw-photo-test.png
+// Then: node tools/test-photo.js   ->   /tmp/miru-photo-test.png
 const fs = require('fs');
 const { encodePNG } = require('../lib/png');
 const { FRAMES, SKINS, drawCat } = require('../renderer/sprites');
@@ -95,5 +95,5 @@ for (const name of names) {
   row++;
 }
 
-fs.writeFileSync('/tmp/pixelpaw-photo-test.png', encodePNG(ctx.w, ctx.h, ctx.data));
-console.log('wrote /tmp/pixelpaw-photo-test.png — rows: ' + names.join(', '));
+fs.writeFileSync('/tmp/miru-photo-test.png', encodePNG(ctx.w, ctx.h, ctx.data));
+console.log('wrote /tmp/miru-photo-test.png — rows: ' + names.join(', '));

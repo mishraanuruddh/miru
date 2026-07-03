@@ -85,7 +85,7 @@ skinIds.forEach((sid, row) => {
   });
 });
 
-const out = process.argv[2] || '/tmp/pixelpaw-preview.png';
+const out = process.argv[2] || '/tmp/miru-preview.png';
 fs.writeFileSync(out, encodePNG(ctx.w, ctx.h, ctx.data));
 console.log('frames: ' + frameIds.join(', '));
 console.log('wrote ' + out + ' (' + ctx.w + 'x' + ctx.h + ')');

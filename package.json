@@ -1,6 +1,6 @@
 {
-  "name": "pixelpaw",
-  "productName": "PixelPaw",
+  "name": "miru",
+  "productName": "Miru",
   "version": "1.0.0",
   "description": "A pixel cat who lives on your macOS desktop — she reacts to you, remembers you, takes voice to-dos, and watches your AI agents. Every pixel drawn in code.",
   "main": "main.js",
@@ -8,17 +8,17 @@
     "start": "electron .",
     "smoke": "electron . --smoke",
     "preview": "node tools/preview.js",
-    "test": "electron . --test /tmp/pixelpaw-test"
+    "test": "electron . --test /tmp/miru-test"
   },
   "license": "MIT",
   "author": "Anuruddh Mishra",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anuruddh/pixelpaw.git"
+    "url": "git+https://github.com/mishraanuruddh/miru.git"
   },
-  "homepage": "https://github.com/anuruddh/pixelpaw#readme",
+  "homepage": "https://github.com/mishraanuruddh/miru#readme",
   "bugs": {
-    "url": "https://github.com/anuruddh/pixelpaw/issues"
+    "url": "https://github.com/mishraanuruddh/miru/issues"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -40,6 +40,6 @@
     "electron": "^42.4.0"
   },
   "bin": {
-    "pawcat": "./tools/pawcat.js"
+    "miru": "./tools/miru.js"
   }
 }

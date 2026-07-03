@@ -9,7 +9,7 @@ function on(channel) {
   };
 }
 
-contextBridge.exposeInMainWorld('pixelpaw', {
+contextBridge.exposeInMainWorld('miru', {
   // shared
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (partial) => ipcRenderer.invoke('settings:set', partial),

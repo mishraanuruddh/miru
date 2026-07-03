@@ -12,7 +12,7 @@ People who live at a computer all day — writers, designers, and especially dev
 
 ## Product Purpose
 
-PixelPaw is a desktop pixel cat that is also an ambient AI interface. She reacts to typing, scrolling, and petting; she builds a real relationship over weeks (bond levels, morning greetings, streaks with weekend grace, overnight gifts). She is useful: spoken utterances become to-dos, notes, quick answers, or commands typed into a live agent terminal — always behind confirmation chips, always undoable. She watches AI agent sessions and relays their questions. Success looks like: the cat earns permanent screen residency because she gives more attention than she takes.
+Miru is a desktop pixel cat that is also an ambient AI interface. She reacts to typing, scrolling, and petting; she builds a real relationship over weeks (bond levels, morning greetings, streaks with weekend grace, overnight gifts). She is useful: spoken utterances become to-dos, notes, quick answers, or commands typed into a live agent terminal — always behind confirmation chips, always undoable. She watches AI agent sessions and relays their questions. Success looks like: the cat earns permanent screen residency because she gives more attention than she takes.
 
 ## Brand Personality
 
