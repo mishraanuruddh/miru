@@ -1436,6 +1436,16 @@ async function runScenarios(ctx) {
     broadcastSettings();
   });
 
+  await scenario('vendor: site copies of sprites + gifts match renderer', async () => {
+    const root = path.join(__dirname, '..');
+    for (const f of ['sprites.js', 'gifts.js']) {
+      const src = fs.readFileSync(path.join(root, 'renderer', f), 'utf8');
+      const copy = fs.readFileSync(path.join(root, 'site', 'vendor', f), 'utf8');
+      assert(src === copy,
+        `site/vendor/${f} is stale — refresh: cp renderer/sprites.js renderer/gifts.js site/vendor/`);
+    }
+  });
+
   // ------------------------------------------------------------------ report
   const failed = results.filter((r) => !r.pass);
   console.log('---');

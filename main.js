@@ -72,6 +72,7 @@ let tray = null;
 let agentServer = null;
 let agentPort = null;
 let uiohookOk = false;
+let uiohookRef = null; // held so will-quit can stop the global listener
 
 // ---------------------------------------------------------------- helpers
 function send(channel, payload) {
@@ -322,6 +323,7 @@ function attachUiohook() {
 
     uIOhook.start();
     uiohookOk = true;
+    uiohookRef = uIOhook;
     console.log('[uiohook] started');
   } catch (e) {
     console.error('[uiohook] failed to start:', e.message);
@@ -2167,6 +2169,10 @@ app.on('window-all-closed', (e) => {
 
 app.on('will-quit', () => {
   transcribeLib.cleanupStale(); // stray voice recordings from crashes
+  try { if (store) store.flush(); } catch { /* best effort on the way out */ }
+  try { if (agentServer) agentServer.close(); } catch { /* already down */ }
+  try { if (uiohookRef) uiohookRef.stop(); } catch { /* never started */ }
+  try { globalShortcut.unregisterAll(); } catch { /* none registered */ }
 });
 
 // miru:// deep links (registration is a no-op until packaged on some setups)

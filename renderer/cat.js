@@ -565,6 +565,10 @@
     return 'idle';
   }
 
+  // CLAUDE.md doctrine: ambient rituals must be TEST-inert (the harness pulls
+  // them forward via __catPoke instead). every new ambient trigger gates here.
+  function ambientEnabled() { return !st.testMode; }
+
   function update(dt) {
     const t = now();
 
@@ -661,13 +665,13 @@
     }
     // grooming ritual: idle cats keep themselves clean (harness runs poke
     // st.groomUntil directly — ambient fires would eat frame-assert windows)
-    if (!st.testMode && st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
+    if (ambientEnabled() && st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
       st.groomUntil = t + 2800;
       st.nextGroomT = t + 45000 + Math.random() * 75000;
     }
     if (st.mode !== 'idle') st.groomUntil = Math.min(st.groomUntil, t); // interrupted
     // a very rare blep: the tongue comes out and she forgets about it
-    if (!st.testMode && st.mode === 'idle' && t > st.nextBlepT) {
+    if (ambientEnabled() && st.mode === 'idle' && t > st.nextBlepT) {
       st.blepUntil = t + 2600;
       st.nextBlepT = t + 240000 + Math.random() * 360000;
     }
@@ -1739,7 +1743,7 @@
   loop();
 
   // test hook: trigger a ritual directly so scenarios don't wait minutes
-  // (ambient groom/blep schedulers are inert under the harness — st.testMode)
+  // (ambient groom/blep schedulers are inert under the harness — ambientEnabled)
   window.__catPoke = (what) => {
     const t = now();
     if (what === 'groom') st.groomUntil = t + 2800;
