@@ -880,10 +880,62 @@
     ])),
   };
 
-  // side-view action frames borrowed from classic (cloned so the sticker
-  // rim below doesn't leak into the classic set's outline cache)
-  KFRAMES.run_a = { ...FRAMES.run_a };
-  KFRAMES.run_b = { ...FRAMES.run_b };
+  // run cycle transcribed cell-for-cell from the run_extended/run_crossing
+  // charts in pixel-cat-images/sprites.json (mirrored to face right, like
+  // the engine expects) — full stride and mid-gather, striped tail, baked
+  // faces since these alternate every ~80ms
+  KFRAMES.run_a = {
+    w: 30, h: 20, eyes: {}, mouth: null, side: true,
+    rows: [
+      '...............ww.....ww......',
+      '...............wLw....wRw.....',
+      '...............wiLw...wiw.....',
+      '....ww.........wiLwwwwwiRw....',
+      '...wttw........wiwLLLRwiRw....',
+      '...wttw.......wwwLLLLRRRRRw...',
+      '....wttw......wLLLLLLRRRRRw...',
+      '....wGww......wLLLLLLRRRRRRw..',
+      '....wwTw......wLLLwLLRRwRRRw..',
+      '....wTTww....wLLLLwLLRRwRRRw..',
+      '.....wwGw..wwwBBBGwLLRRwGRRRww',
+      '......wwGw...wBBBLLLLwRRRRRRw.',
+      '.......wwGwwwBwBBLLLwRwRRRRw..',
+      '........wwwTTBBwBLLLLRRRRRw...',
+      '.........wTTTBBBwLLLLRRRRw....',
+      '........wwTTTBBBBwwwwwwwww....',
+      '......w..wwFFGFFFGFFFww...ww..',
+      '........wFFwwwGGGwwwFFFwG...G.',
+      '........wFw.........wFFw..w...',
+      '.........w...........ww.......',
+    ],
+  };
+  KFRAMES.run_b = {
+    w: 30, h: 20, eyes: {}, mouth: null, side: true,
+    rows: [
+      '...............ww......ww.....',
+      '...............wLw.....wRw....',
+      'wwww...........wiLwwwwwwiRw...',
+      'wtttw..........wiwLLLLRwiRw...',
+      '.wtww.........wwwLLLLLRRRRRw..',
+      '.wwtw.........wLLLLLLLRRRRRw..',
+      '.wtww.........wLLLLLLLRRRRRRw.',
+      '.www........wwLLLLwLLLRwRRRRw.',
+      '.wTTw........wLLLGwLLLRwGRRRww',
+      '..Gwww......wwLLLLLLLwRRRRRRw.',
+      '..wwwTwwwwwwBLwLLLLLwLwRRRRRww',
+      '...wwGGwwTTBBLwGLLLLLLRRRRRw..',
+      '....wwwwTTTBBLLwwLLLLLRRRRw...',
+      '.......wTTTBBLLLwwwwwwwwww....',
+      '.......wFFFFFFFFFwGGGGw.......',
+      '........wFFGGFwFFFwwFw........',
+      '.........wGwGwwGGFFFw.........',
+      '..........wGFFwGGwFFw.........',
+      '...........wGFFwwGww..........',
+      '.............GGw..w...........',
+    ],
+  };
+  // leap still borrowed from classic (cloned so the sticker rim below
+  // doesn't leak into the classic set's outline cache)
   KFRAMES.leap = { ...FRAMES.leap };
 
   // every kawaii frame is a die-cut sticker: white rim around the whole cat
