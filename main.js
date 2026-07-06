@@ -118,7 +118,10 @@ function createCatWindow() {
   });
   catWin.setAlwaysOnTop(true, 'screen-saver');
   catWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  catWin.setIgnoreMouseEvents(true, { forward: true });
+  // in test runs the real OS mouse must never reach the cat (a stray hover
+  // mid-suite reads as petting); injected sendInputEvent input still lands
+  if (TEST) catWin.setIgnoreMouseEvents(true);
+  else catWin.setIgnoreMouseEvents(true, { forward: true });
   catWin.loadFile(path.join(__dirname, 'renderer', 'cat.html'));
   catWin.on('closed', () => { catWin = null; });
 }
@@ -151,9 +154,12 @@ let tickAccum = 0;
 let drag = null; // {ox, oy, lastX, lastY, lastT}
 const hunt = { phase: 'none', t: 0, slowFor: 0, cooldownUntil: 0, dir: 1 };
 
+// vertical anchor: roughly the cat's body center above the window bottom
+const CAT_ANCHOR_Y = 70;
+
 function catCenter() {
   const b = catWin.getBounds();
-  return { x: b.x + WIN_W / 2, y: b.y + WIN_H - 70 };
+  return { x: b.x + WIN_W / 2, y: b.y + WIN_H - CAT_ANCHOR_Y };
 }
 
 function startHunt() {
@@ -235,7 +241,7 @@ function pollLoop() {
     if (hunt.phase !== 'crouch' && dist > 1) {
       const nx = c.x + ((cur.x - c.x) / dist) * step;
       const ny = c.y + ((cur.y - c.y) / dist) * step;
-      const p = clampToWorkArea(nx - WIN_W / 2, ny - (WIN_H - 70));
+      const p = clampToWorkArea(nx - WIN_W / 2, ny - (WIN_H - CAT_ANCHOR_Y));
       catWin.setPosition(p.x, p.y);
     }
     send('hunt', { phase: hunt.phase, dir: hunt.dir });
@@ -2002,6 +2008,7 @@ function setupIpc() {
 
   ipcMain.on('cat:set-interactive', (e, interactive) => {
     if (!catWin || catWin.isDestroyed()) return;
+    if (TEST) return; // test window stays deaf to the real mouse
     if (interactive) catWin.setIgnoreMouseEvents(false);
     else catWin.setIgnoreMouseEvents(true, { forward: true });
   });

@@ -852,13 +852,13 @@
     const { f: frame, flip } = pickFrame();
     const t = now();
 
-    // scale animation for stretch mode
+    // gentle swell for the play-bow stretch — the pose itself carries it
     let anim = 1;
     if (st.mode === 'stretch') {
       const k = Math.min(1, st.modeT / 0.8);
       const remain = (st.stretchUntil - t) / 1000;
       const out = remain < 0.8 ? Math.max(0, remain / 0.8) : 1;
-      anim = 1 + 0.55 * Math.min(k, out) + Math.sin(t / 300) * 0.02;
+      anim = 1 + 0.08 * Math.min(k, out) + Math.sin(t / 300) * 0.015;
     }
 
     // hop offset (celebrate / quick hops / leap)
