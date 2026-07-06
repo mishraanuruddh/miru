@@ -336,8 +336,22 @@ const sessions = new Map();
 let pendingQuestion = null; // {qid, sessionKey, agent, header, question, options, multiSelect, canType, tty}
 const askCalls = []; // TEST-mode introspection
 
+// agent/tool output is wild: collapse newlines/tabs/control chars to single
+// spaces and clamp — every external string is cleaned before a pixel surface
+function cleanText(v, max) {
+  return String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f\s]+/g, ' ').trim().slice(0, max);
+}
+
+// block surfaces (the ask panel body) keep the author's line breaks — the
+// structure of a question is content; each line is still cleaned + clamped
+function cleanBlock(v, maxLen, maxLines) {
+  const lines = String(v == null ? '' : v).split(/\r\n|\r|\n/)
+    .map((l) => cleanText(l, maxLen)).filter(Boolean).slice(0, maxLines);
+  return lines.join('\n').slice(0, maxLen);
+}
+
 function agentLabel(name) {
-  const n = String(name || 'agent').toLowerCase();
+  const n = (cleanText(name, 40) || 'agent').toLowerCase();
   if (n.includes('claude')) return 'CLAUDE';
   if (n.includes('codex')) return 'CODEX';
   return n.replace(/[-_].*$/, '').toUpperCase().slice(0, 10) || 'AGENT';
@@ -459,7 +473,7 @@ function handleClaudeHook(route, data, tty) {
       agentDone(sid, 'CLAUDE');
       break;
     case 'notification': {
-      const msg = String(data.message || 'CLAUDE NEEDS YOU!').slice(0, 110);
+      const msg = cleanText(data.message, 110) || 'CLAUDE NEEDS YOU!';
       const sTty2 = tty || (sessions.get(sid) || {}).tty;
       // idle "waiting for input" nudges are not urgent: gentle bubble, no red LED
       const soft = /waiting for .*(input|you)|idle/i.test(msg);
@@ -480,15 +494,15 @@ function handleClaudeHook(route, data, tty) {
       const questions = (data.tool_input && data.tool_input.questions) || [];
       if (!questions.length) break;
       const q = questions[0];
-      const options = (q.options || []).map((o) => String(o.label || '')).filter(Boolean).slice(0, 4);
+      const options = (q.options || []).map((o) => cleanText(o && o.label, 60)).filter(Boolean).slice(0, 4);
       const sTty = tty || (sessions.get(sid) || {}).tty || null;
-      sessionUpsert(sid, { lastMsg: String(q.question || '').slice(0, 70) });
+      sessionUpsert(sid, { lastMsg: cleanText(q.question, 70) });
       pendingQuestion = {
         qid: sid + ':' + Date.now(),
         sessionKey: sid,
         agent: 'CLAUDE',
-        header: String(q.header || '').slice(0, 16),
-        question: String(q.question || '').slice(0, 200),
+        header: cleanText(q.header, 16),
+        question: cleanBlock(q.question, 300, 8),
         options,
         multiSelect: !!q.multiSelect,
         extraQuestions: questions.length - 1,
@@ -498,7 +512,7 @@ function handleClaudeHook(route, data, tty) {
       sessionUpsert(sid, { state: 'alert', hasQuestion: true, tty: sTty });
       // a live agent question outranks ambient nudges
       if (activeConfirm && AMBIENT_CONFIRM[activeConfirm.kind]) clearConfirm('preempted');
-      pushInbox('claude asks: ' + String(q.question || '').slice(0, 80), 'ask');
+      pushInbox('claude asks: ' + cleanText(q.question, 80), 'ask');
       send('ask', { ...pendingQuestion });
       break;
     }
@@ -576,7 +590,7 @@ function startAgentServer() {
           return done(200, { ok: true });
         }
         if (p === '/say') {
-          const text = String(data.text || '').slice(0, 120);
+          const text = cleanText(data.text, 120);
           if (text) { send('remind', { text, kind: 'say' }); pushInbox(text, 'say'); }
           return done(200, { ok: true });
         }
@@ -647,7 +661,7 @@ function startAgentServer() {
           return done(200, { ok: true, ...r });
         }
         if (p === '/todo') {
-          const raw = String(data.text || '').slice(0, 110);
+          const raw = cleanText(data.text, 110);
           if (!raw) return done(400, { ok: false, error: 'no text' });
           const { text, due } = addTask(raw);
           send('remind', { text: 'TODO: ' + text.toUpperCase(), kind: 'say' });
@@ -704,8 +718,7 @@ function startAgentServer() {
         if (p === '/hook/codex/notify') {
           const type = String(data.type || '');
           if (type === 'agent-turn-complete' && store.get().agent.enabled) {
-            const msg = String(data['last-assistant-message'] || data.last_assistant_message || '')
-              .replace(/\s+/g, ' ').trim().slice(0, 110);
+            const msg = cleanText(data['last-assistant-message'] || data.last_assistant_message, 110);
             const srcTty = sanitizeTty(u.searchParams.get('tty'));
             const cmd = String(req.headers['x-codex-cmd'] || '');
             const project = (cmd.match(/projects\/([^/\s"]+)/) || [])[1];
@@ -732,7 +745,7 @@ function startAgentServer() {
               if (data.interactive) sessionUpsert(key, { interactive: true });
               agentDone(key, label);
             } else if (state === 'alert') {
-              const msgA = String(data.message || `${label} NEEDS YOU!`).slice(0, 110);
+              const msgA = cleanText(data.message, 110) || `${label} NEEDS YOU!`;
               sessionUpsert(key, { agent: label, state: 'alert', lastMsg: msgA, interactive: !!data.interactive });
               if (backgroundMuted(!!data.interactive)) pushInbox(`${label.toLowerCase()} (bg) needs attention: ${msgA}`, 'agent');
               else send('agent-alert', { agent: label, message: msgA });
@@ -1356,7 +1369,7 @@ function handleDeepLink(url) {
   try { u = new URL(String(url)); } catch { return { ok: false, error: 'bad url' }; }
   if (u.protocol !== 'miru:') return { ok: false, error: 'wrong scheme' };
   const cmd = (u.hostname || u.pathname.replace(/^\/+/, '')).toLowerCase();
-  const text = (u.searchParams.get('text') || '').slice(0, 120);
+  const text = cleanText(u.searchParams.get('text'), 120);
   switch (cmd) {
     case 'say':
       if (text) { send('remind', { text, kind: 'say' }); pushInbox(text, 'say'); }

@@ -1161,19 +1161,30 @@
     ctx.fillRect(x, y, w, h);
   }
 
-  function wrapText(text, maxPx, px) {
-    const words = text.split(' ');
+  function wrapText(text, maxPx, px, maxLines = 4) {
     const lines = [];
-    let cur = '';
-    for (const w of words) {
-      const cand = cur ? cur + ' ' + w : w;
-      if (PixelFont.measure(cand, px) > maxPx && cur) {
-        lines.push(cur);
-        cur = w;
-      } else cur = cand;
+    for (const seg of String(text).split('\n')) { // authored breaks are real
+      let cur = '';
+      for (const word of seg.split(' ')) {
+        let w = word;
+        // hard-break tokens wider than the box (agents send long urls + paths)
+        while (PixelFont.measure(w, px) > maxPx && w.length > 1) {
+          if (cur) { lines.push(cur); cur = ''; }
+          let i = 1;
+          while (i < w.length - 1 && PixelFont.measure(w.slice(0, i + 1), px) <= maxPx) i++;
+          lines.push(w.slice(0, i));
+          w = w.slice(i);
+        }
+        const cand = cur ? cur + ' ' + w : w;
+        if (PixelFont.measure(cand, px) > maxPx && cur) {
+          lines.push(cur);
+          cur = w;
+        } else cur = cand;
+      }
+      if (cur) lines.push(cur);
     }
-    if (cur) lines.push(cur);
-    return lines.slice(0, 4);
+    if (!lines.length) lines.push('');
+    return lines.slice(0, maxLines);
   }
 
   function drawBubbles() {
@@ -1208,12 +1219,15 @@
     const w = Math.min(W - 16, 330);
     const x = W / 2 - w / 2;
     const lh = 7 * px;
-    const qLines = wrapText(q.question.toUpperCase(), w - 20, px).slice(0, 3);
+    const qAll = wrapText(q.question.toUpperCase(), w - 20, px, 99);
+    const qLines = qAll.slice(0, 5);
+    const qMore = qAll.length - qLines.length;
+    const moreH = qMore > 0 ? 10 : 0;
     const optH = 16;
     const showOptions = q.options.length > 0;
     const footH = 16;
     const noteH = q.canType ? 0 : 12;
-    const h = 16 + qLines.length * lh + 4 + (showOptions ? q.options.length * (optH + 3) : 0) + noteH + footH + 8;
+    const h = 16 + qLines.length * lh + moreH + 4 + (showOptions ? q.options.length * (optH + 3) : 0) + noteH + footH + 8;
     const y = bottomY - h - 8;
 
     // frame
@@ -1231,12 +1245,17 @@
     ctx.fillStyle = '#ffd400';
     ctx.fillRect(x, y, w, 12);
     const title = `${q.agent} ASKS${q.header ? ' · ' + q.header.toUpperCase() : ''}`;
-    PixelFont.draw(ctx, title, x + 6, y + 3, px, '#14131a');
+    PixelFont.draw(ctx, fitText(title, px, w - 12), x + 6, y + 3, px, '#14131a');
 
     let cy = y + 16;
     for (const line of qLines) {
       PixelFont.draw(ctx, line, x + 8, cy, px, '#14131a');
       cy += lh;
+    }
+    if (qMore > 0) {
+      PixelFont.draw(ctx, `+${qMore} MORE LINE${qMore > 1 ? 'S' : ''} IN THE TERMINAL`,
+        x + 8, cy + 1, 1.5, '#8a8794');
+      cy += moreH;
     }
     cy += 4;
 
@@ -1251,7 +1270,7 @@
         ctx.fillRect(bx, by, bw, optH);
         const fg = hovered ? '#14131a' : '#fdf8ec';
         PixelFont.draw(ctx, String(i + 1), bx + 5, by + 5, px, hovered ? '#14131a' : '#ffd400');
-        PixelFont.draw(ctx, truncate(label.toUpperCase(), 30), bx + 16, by + 5, px, fg);
+        PixelFont.draw(ctx, fitText(label.toUpperCase(), px, bw - 24), bx + 16, by + 5, px, fg);
         q.boxes.push({ x: bx, y: by, w: bw, h: optH });
         cy += optH + 3;
       });
@@ -1289,6 +1308,13 @@
     return s.length > n ? s.slice(0, n) : s;
   }
 
+  // pixel-true truncation: chip + title text may never paint past its box
+  function fitText(s, px, maxPx) {
+    let t = String(s);
+    while (t.length > 1 && PixelFont.measure(t, px) > maxPx) t = t.slice(0, -1);
+    return t;
+  }
+
   // shared confirm-chip panel: voice intents, todo follow-ups, wind-down.
   // Same visual language as the question panel; chips flow left to right.
   function drawConfirmPanel(bottomY) {
@@ -1304,7 +1330,7 @@
     const rows = [];
     let row = [], rowW = 0;
     for (const ch of c.chips) {
-      const cw = Math.max(34, PixelFont.measure(String(ch.label).toUpperCase(), 1.5) + 14);
+      const cw = Math.min(w - 16, Math.max(34, PixelFont.measure(String(ch.label).toUpperCase(), 1.5) + 14));
       if (rowW + cw + 4 > w - 16 && row.length) { rows.push(row); row = []; rowW = 0; }
       row.push({ ...ch, w: cw });
       rowW += cw + 4;
@@ -1328,7 +1354,7 @@
     // title strip
     ctx.fillStyle = '#ffd400';
     ctx.fillRect(x, y, w, 12);
-    PixelFont.draw(ctx, String(c.title || '').toUpperCase(), x + 6, y + 3, px, '#14131a');
+    PixelFont.draw(ctx, fitText(String(c.title || '').toUpperCase(), px, w - 12), x + 6, y + 3, px, '#14131a');
 
     let cy = y + 16;
     for (const line of lines) {
@@ -1348,7 +1374,7 @@
         ctx.fillRect(bx - 1, cy - 1, ch.w + 2, chipH + 2);
         ctx.fillStyle = hovered ? '#ffd400' : '#2a2933';
         ctx.fillRect(bx, cy, ch.w, chipH);
-        PixelFont.draw(ctx, String(ch.label).toUpperCase(), bx + 7, cy + 5, 1.5,
+        PixelFont.draw(ctx, fitText(String(ch.label).toUpperCase(), 1.5, ch.w - 12), bx + 7, cy + 5, 1.5,
           hovered ? '#14131a' : primary ? '#ffd400' : '#fdf8ec');
         if (c.autoAt && ch.id === 'confirm' && !c.autoFired) {
           // countdown bar drains under the chip that will fire
@@ -1826,6 +1852,7 @@
     inboxCount: st.inbox.length,
     question: st.question ? {
       qid: st.question.qid,
+      text: st.question.question,
       options: st.question.options,
       canType: st.question.canType,
       status: st.question.status,

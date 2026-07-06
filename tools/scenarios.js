@@ -1446,6 +1446,253 @@ async function runScenarios(ctx) {
     }
   });
 
+  // ------------------------------------------- wild agent output hardening
+  // real agents send multi-line labels, long urls, tabs, and broken json;
+  // none of it may leak raw whitespace into a pixel surface or overflow it
+  const rawPost = (urlPath, bodyStr) => new Promise((resolve) => {
+    const buf = Buffer.from(bodyStr);
+    const req = http.request(
+      { host: '127.0.0.1', port: port(), path: urlPath, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': buf.length } },
+      (res) => { let b = ''; res.on('data', (c) => (b += c)); res.on('end', () => resolve({ status: res.statusCode, body: b })); }
+    );
+    req.on('error', (e) => resolve({ error: e.code || e.message }));
+    req.write(buf);
+    req.end();
+  });
+  const askCleared = async () => {
+    await post('/test/sessions-clear', {});
+    await waitFor(async () => !(await debug()).question, 'panel cleared');
+  };
+
+  await scenario('wild output: multi-line option labels flatten to one-line chips', async () => {
+    await post('/hook/claude/ask?tty=ttys077', { session_id: 'wild1', tool_input: { questions: [{
+      question: 'Which approach should I take for the refactor?',
+      header: 'approach',
+      options: [
+        { label: 'Extract the module\nthen add tests\nthen migrate callers' },
+        { label: 'Big\tbang\trewrite' },
+        { label: 'Leave it alone' },
+      ],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 3 ? x : null;
+    }, '3 option chips drawn');
+    assert(d.question.options[0] === 'Extract the module then add tests then migrate callers',
+      'collapse wrong: ' + JSON.stringify(d.question.options[0]));
+    for (const o of d.question.options) {
+      assert(!/[\n\r\t]/.test(o), 'raw whitespace leaked into option: ' + JSON.stringify(o));
+    }
+    const p = d.question.panelBox;
+    for (const b of d.question.boxes) {
+      assert(b.x >= p.x && b.x + b.w <= p.x + p.w, 'chip overflows panel: ' + JSON.stringify(b));
+    }
+    await cap('wild-ask-multiline');
+    await askCleared();
+  });
+
+  await scenario('wild output: url-heavy question hard-wraps inside the panel', async () => {
+    const url = 'https://github.com/mishraanuruddh/miru/pull/1234/files#diff-9b2fa';
+    await post('/hook/claude/ask', { session_id: 'wild2', tool_input: { questions: [{
+      question: 'Should I link ' + url + ' in the changelog for this release?',
+      options: [{ label: 'Yes' }, { label: 'No' }],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 2 ? x : null;
+    }, 'panel with 2 chips');
+    // glyph-overflow regression: nothing may paint right of the panel border
+    const leak = await catWin.webContents.executeJavaScript(`
+      (() => {
+        const q = window.__catDebug().question;
+        if (!q || !q.panelBox) return -1;
+        const cv = document.getElementById('cat');
+        const dpr = window.devicePixelRatio || 1;
+        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
+        const y0 = Math.ceil(q.panelBox.y * dpr);
+        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
+        let n = 0;
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x < cv.width; x++) {
+            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
+          }
+        }
+        return n;
+      })()
+    `);
+    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    await cap('wild-ask-url-wrap');
+    await askCleared();
+  });
+
+  await scenario('wild output: multiSelect + extra questions fall back to terminal', async () => {
+    await post('/hook/claude/ask?tty=ttys077', { session_id: 'wild3', tool_input: { questions: [
+      { question: 'Pick everything that applies to the deploy.', multiSelect: true,
+        options: [{ label: 'Run migrations' }, { label: 'Clear caches' }] },
+      { question: 'And which environment?', options: [{ label: 'Staging' }] },
+    ] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 2 ? x : null;
+    }, 'first question drawn');
+    assert(d.question.canType === false, 'multiSelect must never be typeable');
+    await cap('wild-ask-multiselect');
+    await askCleared();
+  });
+
+  await scenario('wild output: six options cap at four, empty labels drop', async () => {
+    await post('/hook/claude/ask', { session_id: 'wild4', tool_input: { questions: [{
+      question: 'Which fixture should the test target?',
+      options: [{ label: 'One' }, { label: '' }, { label: 'Two' }, { label: 'Three' },
+                { label: 'Four' }, { label: 'Five' }, { label: 'Six' }],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length ? x : null;
+    }, 'chips drawn');
+    assert(d.question.options.length === 4, 'expected 4 capped options, got ' + d.question.options.length);
+    assert(d.question.boxes.length === 4, 'expected 4 chips, got ' + d.question.boxes.length);
+    await askCleared();
+  });
+
+  await scenario('wild output: option-less question still asks', async () => {
+    await post('/hook/claude/ask', { session_id: 'wild5', tool_input: { questions: [{
+      question: 'Free-form: what should the commit message say?', options: [],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.panelBox ? x : null;
+    }, 'panel drawn');
+    assert(d.question.boxes.length === 0, 'no chips expected');
+    await cap('wild-ask-freeform');
+    await askCleared();
+  });
+
+  await scenario('wild output: malformed json + oversized body bounce off', async () => {
+    const bad = await rawPost('/hook/claude/ask', '{"tool_input": {"questions": [{');
+    assert(bad.status === 200, 'malformed body should no-op 200, got ' + JSON.stringify(bad));
+    await wait(200);
+    assert(!(await debug()).question, 'broken payload must not raise a panel');
+    const big = await rawPost('/say', JSON.stringify({ text: 'x'.repeat(80000) }));
+    assert(big.error, 'expected the 64KB cap to drop the socket, got ' + JSON.stringify(big));
+    const health = JSON.parse((await httpGet(port(), '/health')).body);
+    assert(health.ok === true, 'server unhealthy after hostile payloads');
+    assert((await debug()).ready, 'renderer should be untouched');
+  });
+
+  await scenario('wild output: codex multi-line message collapses, unknown type ignored', async () => {
+    const before = (store.get().inboxLog || []).length;
+    await post('/hook/codex/notify', {
+      type: 'agent-turn-complete',
+      'last-assistant-message': 'Refactored the parser.\n\nAll 12 tests pass.\n\tReady for review.',
+    });
+    await waitFor(async () => (store.get().inboxLog || []).length === before + 1, 'inbox entry');
+    const entry = store.get().inboxLog[0];
+    assert(!/[\n\r\t]/.test(entry.text), 'inbox kept raw whitespace: ' + JSON.stringify(entry.text));
+    assert(entry.text.includes('Refactored the parser. All 12 tests pass. Ready for review.'),
+      'unexpected collapse: ' + JSON.stringify(entry.text));
+    await post('/hook/codex/notify', { type: 'session-configured', 'last-assistant-message': 'ignore me' });
+    await wait(300);
+    assert((store.get().inboxLog || []).length === before + 1, 'unknown type must not inbox');
+    await post('/test/sessions-clear', {});
+  });
+
+  await scenario('wild output: background agent alert stays silent and single-line', async () => {
+    await post('/agent', { agent: 'deploy-bot', state: 'alert', interactive: false,
+      message: 'Deploy failed:\n  step 3/7\n  rollback started' });
+    await waitFor(async () => {
+      const e = (store.get().inboxLog || [])[0];
+      return e && e.text.includes('needs attention') ? e : null;
+    }, 'bg alert inboxed');
+    const entry = store.get().inboxLog[0];
+    assert(!/[\n\r]/.test(entry.text), 'newlines leaked: ' + JSON.stringify(entry.text));
+    assert(entry.text.includes('deploy (bg) needs attention: Deploy failed: step 3/7 rollback started'),
+      'label or message wrong: ' + entry.text);
+    assert((await debug()).mode !== 'alert', 'background alert must not take the cat over');
+    await post('/agent', { agent: 'deploy-bot', state: 'idle' });
+    await post('/test/sessions-clear', {});
+  });
+
+  await scenario('wild output: /say + /todo newline payloads land clean', async () => {
+    await post('/say', { text: 'hello from a\nmulti-line\tscript' });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.bubbleBox && x.bubble ? x : null;
+    }, 'bubble drawn');
+    assert(!/[\n\t]/.test(d.bubble), 'bubble kept raw whitespace: ' + JSON.stringify(d.bubble));
+    assert(d.bubble.toUpperCase().includes('MULTI-LINE SCRIPT'), 'collapse wrong: ' + JSON.stringify(d.bubble));
+    await cap('wild-say-clean');
+    const r = await post('/todo', { text: 'ship the release\nnotes @ +45m' });
+    const res = JSON.parse(r.body);
+    assert(res.ok && res.due, 'due token split by a newline was not parsed: ' + r.body);
+    const task = (store.get().tasks || [])[0];
+    assert(task && !/[\n]/.test(task.text), 'task text kept newline: ' + JSON.stringify(task && task.text));
+    store.set({ tasks: (store.get().tasks || []).filter((t) => t.id !== task.id) });
+    broadcastSettings();
+    // remind bubbles live 9s; outlast the TODO bubble so nothing leaks onward
+    await waitFor(async () => !(await debug()).bubbleBox, 'bubbles gone', 12000, 200);
+  });
+
+  await scenario('wild output: oversized confirm chip label clamps inside panel', async () => {
+    await post('/test/confirm', { kind: 'voice', title: 'A tool with opinions',
+      text: 'It wants to run something with a very long name.',
+      chips: [
+        { id: 'confirm', label: 'ABSOLUTELY POSITIVELY RUN THE ENORMOUS MIGRATION RIGHT NOW' },
+        { id: 'cancel', label: 'NO' },
+      ] });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.confirm && x.confirm.boxes && x.confirm.boxes.length === 2 ? x : null;
+    }, 'confirm chips drawn');
+    const p = d.confirm.panelBox;
+    for (const b of d.confirm.boxes) {
+      assert(b.x >= p.x && b.x + b.w <= p.x + p.w, 'chip overflows panel: ' + JSON.stringify(b));
+    }
+    await cap('wild-confirm-clamped');
+    clickBox(d.confirm.dismissBox);
+    await waitFor(async () => !(await debug()).confirm, 'confirm dismissed');
+  });
+
+  await scenario('wild output: structured question keeps its authored line breaks', async () => {
+    await post('/hook/claude/ask?tty=ttys077', { session_id: 'wild6', tool_input: { questions: [{
+      question: 'I found four approaches:\n1. Extract the module\n2. Rewrite in place\n' +
+        '3. Split the file\n4. Leave it alone\n\nWhich should I take?',
+      options: [{ label: 'Extract' }, { label: 'Rewrite' }, { label: 'Leave it' }],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 3 ? x : null;
+    }, '3 chips drawn');
+    // structure is content: the numbered list must survive to the renderer
+    assert(d.question.text.split('\n').length === 6,
+      'authored breaks lost: ' + JSON.stringify(d.question.text));
+    // the taller structured panel must still stay inside its border
+    const leak = await catWin.webContents.executeJavaScript(`
+      (() => {
+        const q = window.__catDebug().question;
+        if (!q || !q.panelBox) return -1;
+        const cv = document.getElementById('cat');
+        const dpr = window.devicePixelRatio || 1;
+        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
+        const y0 = Math.ceil(q.panelBox.y * dpr);
+        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
+        let n = 0;
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x < cv.width; x++) {
+            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
+          }
+        }
+        return n;
+      })()
+    `);
+    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    await cap('wild-ask-structured');
+    await askCleared();
+  });
+
   // ------------------------------------------------------------------ report
   const failed = results.filter((r) => !r.pass);
   console.log('---');
