@@ -202,7 +202,7 @@
 
   // dragged / hanging (mochi): long narrow body, paws up by chest, feet dangle
   FRAMES.hang = {
-    w: 24, h: 26, eyes: EYES_FRONT, mouth: MOUTH_FRONT,
+    w: 24, h: 26, pivot: 13, eyes: EYES_FRONT, mouth: MOUTH_FRONT,
     rows: [
       ...HEAD,
       '......BFFBBBBBBFFB......',
@@ -394,8 +394,17 @@
   function drawCat(ctx, frame, skin, px, ox, oy, opts = {}) {
     const { rows, w } = frame;
     const X = (x) => ox + (opts.flip ? w - 1 - x : x) * px;
-    // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top
-    const SH = (y) => (opts.tilt ? Math.round(opts.tilt * (rows.length - 1 - y) / 8) * px : 0);
+    // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top.
+    // drag swing (opts.swing, in art cells): rows below frame.pivot shear
+    // like a pendulum, strongest at the bottom — the head stays put
+    const SH = (y) => {
+      let s = opts.tilt ? Math.round(opts.tilt * (rows.length - 1 - y) / 8) * px : 0;
+      if (opts.swing && frame.pivot != null && y > frame.pivot) {
+        // screen-pixel granularity, not art cells — the swing must be smooth
+        s += Math.round(opts.swing * (y - frame.pivot) / Math.max(1, rows.length - 1 - frame.pivot) * px);
+      }
+      return s;
+    };
     ctx.save();
     if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
 
@@ -676,28 +685,55 @@
     ],
   };
 
-  // dragged / hanging (mochi): narrow dangle, paws up by the chest
+  // dragged / hanging: transcribed cell-for-cell from the dangling chart in
+  // pixel-cat-images/sprites.json — held by the scruff, forelegs hanging,
+  // long torso, tail curling below. Eyes stay live (same slim chart eyes).
   KFRAMES.hang = {
-    w: 30, h: 23, eyes: KEYES, mouth: KMOUTH,
-    rows: merge([
-      ...KHEAD,
-      K30('..............wwCCCCCCCww'),
-      K30('..............wFFCCCFFw'),
-      K30('..............wCCCCCCCw'),
-      K30('..............wCCCCCCCw'),
-      K30('..............wCCCCCCCw'),
-      K30('..............wCCCCCCCw'),
-      K30('..............wBCCCCCBw'),
-      K30('..............wwFFwFFww'),
-      K30('...............ww..ww'),
-    ], overlay(Array(23).fill('.'.repeat(30)), [
-      [16, K30('............wTw')],
-      [17, K30('...........wTTw')],
-      [18, K30('...........wTw')],
-      [19, K30('..........wTw')],
-      [20, K30('..........wtw')],
-      [21, K30('..........wtw')],
-    ])),
+    w: 21, h: 40, pivot: 15, // body below the neck row swings while dragged
+    eyes: { l: [8, 7], r: [13, 7], size: 2, h: 3, pw: 1, ph: 3 },
+    mouth: [11, 11],
+    rows: [
+      '.......ww......ww....',
+      '......wLw.....wRw....',
+      '......wiw....wRiw....',
+      '.....wLiwwwwwwRiw....',
+      '.....wLiwLLLRRwiw....',
+      '....wLLLLLLLRRRwww...',
+      '....wLLLLLLLRRRRRw...',
+      '...wLLLLLLLLRRRRRw...',
+      '...wLLLLLLLLRRRRRw...',
+      '...wLLLLGLLLRRRGRRwww',
+      'wwwwLLLLLLMMnMMRRRw..',
+      '...wLLLLLLMwMwMRRRwww',
+      'wwwwwLLLLLMMMMMRRw...',
+      '.....wLLLLLLRRRRRw...',
+      '......wwLLLLRRRww....',
+      '......wGwwwwwwww.....',
+      '......wCCGGGGCCw.....',
+      '.....wFFCGCCCFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wGFwCCCwFGw.....',
+      '......wGwCCCwGGw.....',
+      '.......wCCCCCww......',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wGBBwwBBBw.....',
+      '......wGBwBwwBGw.....',
+      '.......wGwBwwGw......',
+      '........wwBwwGw......',
+      '..........ww.w.......',
+      '.........wTw.........',
+      '........wTTw.........',
+      '......wwTTGw.........',
+      '.....wTTTGw..........',
+      '.....wTTGww..........',
+      '.....wGGw............',
+      '......ww.............',
+    ],
   };
 
   // celebrate: airborne happy hop — feet tucked, tail flung up
