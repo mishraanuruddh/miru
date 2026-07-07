@@ -353,11 +353,12 @@
     if (pts) return pts;
     pts = [];
     const { rows, w } = frame;
+    const R = frame.regionOf || REGION_OF; // packs may add region chars
     const solid = (x, y) => {
       if (x < 0 || y < 0 || y >= rows.length || x >= w) return false;
       const ch = rows[y][x];
       if (ch === 'w') return !!frame.rim;
-      return ch !== '.' && REGION_OF[ch] != null;
+      return ch !== '.' && R[ch] != null;
     };
     for (let y = -1; y <= rows.length; y++) {
       for (let x = -1; x <= w; x++) {
@@ -395,6 +396,7 @@
   //   tilt: ±1 curious head-lean (rows shear sideways, strongest at the top)
   function drawCat(ctx, frame, skin, px, ox, oy, opts = {}) {
     const { rows, w } = frame;
+    const R = frame.regionOf || REGION_OF; // packs may add region chars
     const X = (x) => ox + (opts.flip ? w - 1 - x : x) * px;
     // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top.
     // drag swing (opts.swing, in art cells): rows below frame.pivot shear
@@ -425,7 +427,7 @@
       for (let x = 0; x < row.length; x++) {
         const ch = row[x];
         if (ch === '.') continue;
-        const region = REGION_OF[ch];
+        const region = R[ch];
         if (!region) continue;
         let color = skin[region];
         if (!color && region === 'pawUp') {
@@ -448,8 +450,10 @@
     }
 
     // pixel-level overrides (face markings etc.) — only on front frames
-    // where art coordinates line up; only recolors existing pixels
-    if (opts.overrides && (w === 24 || w === 30)) {
+    // where art coordinates line up; only recolors existing pixels. The pack
+    // registry stamps .ov (same width as sit, not a side view); raw frames
+    // that never passed through it keep the historical width gate.
+    if (opts.overrides && (frame.ov != null ? frame.ov : w === 24 || w === 30)) {
       for (const key in opts.overrides) {
         const [px2, py2] = key.split(',').map(Number);
         if (!(py2 >= 0 && py2 < rows.length)) continue;
@@ -1000,12 +1004,322 @@
   // every kawaii frame is a die-cut sticker: white rim around the whole cat
   for (const id in KFRAMES) KFRAMES[id].rim = true;
 
-  const SPRITE_SETS = { kawaii: KFRAMES, classic: FRAMES };
+  // -------------------------------------------- pack art: kawaii (2026-06)
+  // The pre-sticker baby-schema set, kept as a selectable pack. Verbatim from
+  // history (9de2d11); only the shared side frames are referenced, and the
+  // registry clones them so packs never share frame objects.
+  const OLDKFRAMES = (() => {
+    const KHEAD = [
+      '....LL............RR....',
+      '...LLLL..........RRRR...',
+      '...LiiL..........RiiR...',
+      '..LLLLLLLLLLRRRRRRRRRR..',
+      '.LLLLLLLLLLLRRRRRRRRRRR.',
+      '.LLLLLLLLLLLRRRRRRRRRRR.',
+      'wLLLLLLLLLLLRRRRRRRRRRRw',
+      '.LLLLLLLLLLLRRRRRRRRRRR.',
+      'wLLLLLLLLLLLRRRRRRRRRRRw',
+      '.LLLLLLLLLnnRRRRRRRRRRR.',
+      '..LLLLLLLMMMMRRRRRRRRR..',
+      '...LLLLLLMMMMRRRRRRRR...',
+    ];
+    const KEYES = { l: [3, 6], r: [16, 6], size: 5, h: 4 }; // low-set, baby schema
+    const KMOUTH = [11, 10];
+
+    // pusheen-style loaf: no neck, body continues the head
+    const KSIT_BODY = [
+      '..BBBBBBBBBBBBBBBBBBBB..',
+      '..BBBBBCCCCCCCCCCBBBBB..',
+      '..BBBBBCCCCCCCCCCBBBBB..',
+      '..BBBBBCCCCCCCCCCBBBBB..',
+      '..BBFFFBCCCCCCCCBFFFBB..',
+      '...FFFF..........FFFF...',
+    ];
+    const KBLANK = Array(18).fill('.'.repeat(24));
+    const KTAIL_REST = overlay(KBLANK, [
+      [11, '....................TTT.'],
+      [12, '...................TTTTT'],
+      [13, '...................TTtTT'],
+      [14, '...................TTTTT'],
+      [15, '....................TTT.'],
+    ]);
+    const KTAIL_MID = overlay(KBLANK, [
+      [10, '.....................TT.'],
+      [11, '....................TTTT'],
+      [12, '...................TTTTT'],
+      [13, '...................TTtT.'],
+      [14, '...................TTTT.'],
+      [15, '....................TT..'],
+    ]);
+    const KTAIL_UP = overlay(KBLANK, [
+      [8,  '.....................tt.'],
+      [9,  '....................TTTT'],
+      [10, '....................TTTT'],
+      [11, '....................TTT.'],
+      [12, '...................TTT..'],
+      [13, '...................TTT..'],
+      [14, '...................TT...'],
+    ]);
+    const KSIT = [...KHEAD, ...KSIT_BODY];
+
+    const KFRAMES = {};
+    KFRAMES.sit = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_REST) };
+    KFRAMES.sit_tail_mid = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_MID) };
+    KFRAMES.sit_tail_up = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_UP) };
+    KFRAMES.knead_l = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge(overlay(KSIT, [
+        [16, '..BBFFFCCCCCCCCCCFFFB...'],
+        [17, '....BBFF.........FFFF...'],
+      ]), KTAIL_REST),
+    };
+    KFRAMES.knead_r = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge(overlay(KSIT, [
+        [16, '...BFFFCCCCCCCCCCFFFBB..'],
+        [17, '...FFFF.........FFBB....'],
+      ]), KTAIL_REST),
+    };
+    KFRAMES.loaf = {
+      w: 24, h: 17, eyes: KEYES, mouth: KMOUTH,
+      rows: [
+        ...KHEAD,
+        '..BBBBBBBBBBBBBBBBBBBB..',
+        '..BBBBBBBBBBBBBBBBBBBB..',
+        '..BBBBBBBBBBBBBBBBBBBB..',
+        '.TTTTTBBBBBBBBBBBBBBBB..',
+        '.tttTTTT................',
+      ],
+    };
+    KFRAMES.hang = {
+      w: 24, h: 24, eyes: KEYES, mouth: KMOUTH,
+      rows: [
+        ...KHEAD,
+        '......BFFBBBBBBFFB......',
+        '......BFFBCCCCBFFB......',
+        '.......BBCCCCCCBB..T....',
+        '.......BBCCCCCCBB..T....',
+        '.......BBCCCCCCBB.T.....',
+        '.......BBBCCCCBBBT......',
+        '........BBBBBBBBt.......',
+        '........FF...FF.........',
+        '........FF...FF.........',
+        '........................',
+        '........................',
+        '........................',
+      ],
+    };
+    KFRAMES.celebrate = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: [
+        ...KHEAD,
+        '..BBBBBBBBBBBBBBBBB.tt..',
+        '..BBBBBCCCCCCCCCCBB.tt..',
+        '..BBBBBCCCCCCCCCCBBTT...',
+        '..BBBBBCCCCCCCCCCBTT....',
+        '...BFFFBCCCCCCCCBFFFB...',
+        '........................',
+      ],
+    };
+    {
+      const pad2k = (r) => '..' + r + '..';
+      const rows = [];
+      rows.push('.FF......................FF.');
+      rows.push('.FF......................FF.');
+      rows.push('.BB......................BB.');
+      rows.push('.BB.' + KHEAD[0].slice(2, 22) + '.BB.');
+      rows.push('.BB.' + KHEAD[1].slice(2, 22) + '.BB.');
+      rows.push('.BB.' + KHEAD[2].slice(2, 22) + '.BB.');
+      rows.push('.BB.' + KHEAD[3].slice(2, 22) + '.BB.');
+      for (let i = 4; i < KHEAD.length; i++) rows.push(pad2k(KHEAD[i]));
+      rows.push('.BBBBBBBBBBBBBBBBBBBBBBBBBB.');
+      rows.push(pad2k('.....BBBCCCCCCCCCCBB....'));
+      rows.push(pad2k('.....BBBCCCCCCCCCCBB.t..'));
+      rows.push(pad2k('.....BBBCCCCCCCCCCBB.T..'));
+      rows.push(pad2k('.....BBBCCCCCCCCCCBBTT..'));
+      rows.push(pad2k('......BBBBBBBBBBBB......'));
+      rows.push(pad2k('......BFFB....BFFB......'));
+      KFRAMES.stretch_up = {
+        w: 28, h: rows.length, eyes: { l: [5, 9], r: [18, 9], size: 5, h: 4 }, mouth: [13, 13],
+        rows,
+      };
+    }
+    // folded-ear rows shared by the idle ear-flick and the sleep dream-twitch
+    const KFLICK_EARS = [
+      '..................RR....',
+      '...LLL...........RRRR...',
+      '...LiiLL.........RiiR...',
+    ];
+    KFRAMES.sit_flick = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge([...KFLICK_EARS, ...KSIT.slice(3)], KTAIL_REST),
+    };
+    KFRAMES.loaf_twitch = {
+      w: 24, h: 17, eyes: KEYES, mouth: KMOUTH,
+      rows: [...KFLICK_EARS, ...KFRAMES.loaf.rows.slice(3)],
+    };
+
+    // grooming: right front paw lifts off the ground (P = shaded raised paw) —
+    // groom1 licks it at the mouth, groom2 wipes it over the ear
+    const KGROOM_BASE = overlay(KSIT, [
+      [16, '..BBFFFBCCCCCCCCBBBBBB..'],
+      [17, '...FFFF.................'],
+    ]);
+    KFRAMES.sit_groom1 = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
+        [8,  '.............ww.........'],
+        [9,  '............wPPw........'],
+        [10, '............wPPPw.......'],
+        [11, '............wPPP........'],
+        [12, '.............wPP........'],
+        [13, '.............wPP........'],
+        [14, '.............wPP........'],
+        [15, '.............wPP........'],
+      ])), KTAIL_REST),
+    };
+    KFRAMES.sit_groom2 = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
+        [2,  '.................PP.....'],
+        [3,  '................wPPP....'],
+        [4,  '.................wPP....'],
+        [5,  '..................wPP...'],
+        [6,  '..................wPP...'],
+        [7,  '..................wPP...'],
+        [8,  '..................wPP...'],
+        [9,  '..................wPP...'],
+        [10, '..................wPP...'],
+        [11, '.................wPP....'],
+        [12, '.................wPP....'],
+        [13, '.................wPP....'],
+        [14, '.................wPP....'],
+        [15, '.................wPP....'],
+      ])), KTAIL_REST),
+    };
+
+    // contentment: tail sweeps around the front and rests over the paws
+    const KTAIL_WRAP = overlay(KBLANK, [
+      [11, '....................TT..'],
+      [12, '...................TTT..'],
+      [13, '...................TTT..'],
+      [14, '..................TTTT..'],
+      [15, '..............TTTTTT....'],
+      [16, '...........TTTTTT.......'],
+      [17, '.........TTTtt..........'],
+    ]);
+    KFRAMES.sit_wrap = {
+      w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+      rows: merge(KSIT, KTAIL_WRAP),
+    };
+
+    // pounce wind-up: hunkered low (two body rows shorter), tail mid-air;
+    // the renderer adds the butt-wiggle oscillation
+    const KCROUCH_TAIL = overlay(Array(16).fill('.'.repeat(24)), [
+      [8,  '.....................TT.'],
+      [9,  '....................TTTT'],
+      [10, '...................TTTTT'],
+      [11, '...................TTtT.'],
+      [12, '...................TTTT.'],
+      [13, '....................TT..'],
+    ]);
+    KFRAMES.crouch = {
+      w: 24, h: 16, eyes: KEYES, mouth: KMOUTH,
+      rows: merge([
+        ...KHEAD,
+        '..BBBBBBBBBBBBBBBBBBBB..',
+        '..BBBBBCCCCCCCCCCBBBBB..',
+        '..BBFFFBCCCCCCCCBFFFBB..',
+        '...FFFF..........FFFF...',
+      ], KCROUCH_TAIL),
+    };
+
+    // side-view action frames shared with classic (they read well at speed)
+    KFRAMES.run_a = FRAMES.run_a;
+    KFRAMES.run_b = FRAMES.run_b;
+    KFRAMES.leap = FRAMES.leap;
+    return KFRAMES;
+  })();
+
+  // ------------------------------------------------------------------ packs
+  // A sprite pack is pure data: frames plus optional custom regions, region
+  // colors, per-skin palette overrides, animation cadences, and named action
+  // responses. Built-ins register here; user packs arrive pre-validated from
+  // main and walk through the same door. Registration clones every frame,
+  // stamps its region table + paint eligibility onto it, and freezes it so
+  // the outline cache can trust frame identity.
+  const PACKS = Object.create(null);
+  function registerPack(def) {
+    const meta = Object.freeze({ ...def.meta });
+    const regionOf = def.regions
+      ? Object.assign(Object.create(null), REGION_OF, def.regions)
+      : null;
+    const sitW = def.frames.sit.w;
+    const frames = Object.create(null);
+    for (const id of Object.keys(def.frames)) {
+      const src = def.frames[id];
+      const f = { ...src, rows: Object.freeze(src.rows.slice()) };
+      if (regionOf) f.regionOf = regionOf;
+      f.ov = f.w === sitW && !f.side; // pixel paint lands only on front frames
+      frames[id] = Object.freeze(f);
+    }
+    const pack = Object.freeze({
+      meta,
+      frames: Object.freeze(frames),
+      regions: def.regions || null,
+      regionDefaults: def.regionDefaults || null,
+      palettes: def.palettes || null,
+      cycles: def.cycles || null,
+      anims: def.anims || null,
+    });
+    PACKS[meta.id] = pack;
+    return pack;
+  }
+  function getPack(id) { return PACKS[id] || null; }
+  function listPacks() { return Object.keys(PACKS).map((id) => PACKS[id]); }
+
+  // one place answers "what colors does this cat wear": preset or custom
+  // base, with the pack's own region colors underneath — base regions always
+  // win, pack palettes exist to color the pack's custom regions per skin
+  function resolveSkin(pack, skinId, customColors) {
+    const base = skinId === 'custom' && customColors
+      ? { ...SKINS.black, ...customColors }
+      : SKINS[skinId] || SKINS.black;
+    if (!pack || (!pack.regionDefaults && !pack.palettes)) return base;
+    return {
+      ...(pack.regionDefaults || {}),
+      ...((pack.palettes || {})[skinId] || {}),
+      ...base,
+    };
+  }
+
+  const stickerPack = registerPack({
+    meta: { id: 'sticker', name: 'Sticker', author: 'nishanth-augustai', freckles: true },
+    frames: KFRAMES,
+    anims: { giftPresent: { frame: 'stretch_up', sparkle: true } },
+  });
+  const classicPack = registerPack({
+    meta: { id: 'classic', name: 'Classic', author: 'miru', freckles: false },
+    frames: FRAMES,
+  });
+  registerPack({
+    meta: { id: 'kawaii', name: 'Kawaii', author: 'miru', freckles: true },
+    frames: OLDKFRAMES,
+  });
+
+  // legacy aliases: spriteStyle ids pre-date packs, so 'kawaii' still means
+  // the default look (sticker) until the spritePack migration lands; the
+  // site reads KFRAMES and must keep seeing the registered sticker frames
+  const SPRITE_SETS = { kawaii: stickerPack.frames, classic: classicPack.frames, sticker: stickerPack.frames };
   function framesFor(style) {
     return SPRITE_SETS[style] || SPRITE_SETS.kawaii;
   }
 
-  const API = { FRAMES, KFRAMES, SPRITE_SETS, framesFor, SKINS, REGION_OF, drawCat, drawFrame, hexToRgb, getOutline, autoInk };
+  const API = {
+    FRAMES: classicPack.frames, KFRAMES: stickerPack.frames, SPRITE_SETS, framesFor,
+    PACKS, registerPack, getPack, listPacks, resolveSkin,
+    SKINS, REGION_OF, drawCat, drawFrame, hexToRgb, getOutline, autoInk,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   else global.Sprites = API;
 })(typeof window !== 'undefined' ? window : globalThis);

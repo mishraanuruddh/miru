@@ -25,10 +25,7 @@
   FRAMES = framesFor(settings.spriteStyle);
 
   function resolveSkin() {
-    if (settings.skin === 'custom' && settings.customColors) {
-      return { ...SKINS.black, ...settings.customColors };
-    }
-    return SKINS[settings.skin] || SKINS.black;
+    return Sprites.resolveSkin(null, settings.skin, settings.customColors);
   }
 
   function applySound() {
