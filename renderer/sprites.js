@@ -17,6 +17,7 @@
     G: 'marking', // gray patches: collar, cheek dots, tail + haunch shading
     D: 'shading', // deep creases: inner ear, under the stretch arch
     p: 'tongue', // the grooming lick — pink on every coat
+    K: 'keycap', // typing keys: contrast with the skin's line color
   };
 
   // ------------------------------------------------------------------ skins
@@ -27,7 +28,7 @@
       headL: '#23212b', headR: '#23212b', muzzle: '#23212b', body: '#23212b',
       chest: '#23212b', paws: '#23212b', tail: '#23212b', tailTip: '#23212b',
       innerEar: '#f2a0b5', nose: '#f2a0b5', iris: '#ffffff', pupil: '#23212b',
-      outline: CREAM, marking: '#332f3d', shading: '#413c4d', rim: '#fefefe',
+      outline: '#fefefe', marking: '#332f3d', shading: '#413c4d', rim: '#181818',
     },
     white: {
       label: 'White',
@@ -62,7 +63,7 @@
       headL: '#2e2b35', headR: '#2e2b35', muzzle: '#f6f3ec', body: '#2e2b35',
       chest: '#f6f3ec', paws: '#f6f3ec', tail: '#2e2b35', tailTip: '#2e2b35',
       innerEar: '#f2a0b5', nose: '#ef8aa0', iris: '#ffffff', pupil: '#2e2b35',
-      outline: CREAM, marking: '#3d3947', shading: '#4a4556', rim: '#fefefe',
+      outline: CREAM, marking: '#3d3947', shading: '#4a4556', rim: '#181818',
     },
     siamese: {
       label: 'Siamese',
@@ -432,6 +433,10 @@
           color = hex3(mixRgb(hexToRgb(skin.paws), pl > 140 ? [0, 0, 0] : [255, 255, 255], pl > 140 ? 0.2 : 0.3));
         }
         if (!color && region === 'tongue') color = '#d6a4a5'; // pink for all coats
+        if (!color && region === 'keycap') {
+          // caps must contrast with the key borders (the skin's line color)
+          color = lum(skin.outline || CREAM) < 130 ? '#fefefe' : '#35323e';
+        }
         if (!color) color = '#ff00ff';
         if (style !== 'plain' && STRIPEABLE[region]) {
           if (style === 'tabby' && (x + y * 2) % 6 < 2) color = patternColor;
@@ -657,20 +662,41 @@
   KFRAMES.sit_tail_mid = { w: 30, h: 26, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_MID) };
   KFRAMES.sit_tail_up = { w: 30, h: 26, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_UP) };
 
-  // kneading: the pressing paw shades (P) as it pushes into the floor
+  // typing: she scoots up to a little two-key keyboard (its own sticker,
+  // separated by open air) — one arm reaches down with the paw landing on
+  // its keycap, which compresses; the other mitt stays raised. Frames are
+  // 5 rows taller than sit, so she visibly sits up to type.
   KFRAMES.knead_l = {
-    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(overlay(KSIT, [
-      [23, K30('......wwGwPPPPGwFFFwwGw')],
-      [24, K30('........wwPPPPPGwFFwGGw')],
-    ]), KTAIL_REST),
+    w: 30, h: 28, eyes: KEYES, mouth: KMOUTH,
+    rows: [
+      ...merge(overlay(KSIT, [
+        [19, K30('..........wCCCCCwFFFwBw')],
+        [20, K30('.........wCCCCCCwwwwwGw')],
+        [21, K30('....wGTTwwCwFFFwCC..wGw')],
+        [22, K30('.....wGGGwCwFFFwCCCwGGw')],
+        [23, K30('......wwGwCwFFFwCC..www')],
+        [24, K30('........wwCwFFFwwwwKKKw')],
+        [25, K30('...........wKKKKKwwKKKKKw')],
+      ]), KTAIL_REST),
+      K30('...........wGGGGGwwGGGGGw'),
+      K30('...........wwwwwwwwwwwwww'),
+    ],
   };
   KFRAMES.knead_r = {
-    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(overlay(KSIT, [
-      [23, K30('......wwGwFFFFGwPPPwwGw')],
-      [24, K30('........wwFFFFFGwPPwGGw')],
-    ]), KTAIL_REST),
+    w: 30, h: 28, eyes: KEYES, mouth: KMOUTH,
+    rows: [
+      ...merge(overlay(KSIT, [
+        [19, K30('.........wFFFwCCCCCwBBw')],
+        [20, K30('.........wwwwwCCCCCCwGw')],
+        [21, K30('....wGTTww...CCCCCwFFFw')],
+        [22, K30('.....wGGGwCCCCCCCwwFFFw')],
+        [23, K30('......wwGwC..www..wFFFw')],
+        [24, K30('........wwC.wKKKw.wFFFww')],
+        [25, K30('...........wKKKKKwwFFFKKw')],
+      ]), KTAIL_REST),
+      K30('...........wGGGGGwwGGGGGw'),
+      K30('...........wwwwwwwwwwwwww'),
+    ],
   };
 
   // loaf for sleeping: head on a low blob, tail wrapped around the front
