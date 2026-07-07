@@ -1432,7 +1432,7 @@ async function runScenarios(ctx) {
     await waitFor(async () => (await debug()).skin === 'calico', 'skin applied');
     await wait(150);
     await cap('calico');
-    store.set({ skin: 'black' });
+    store.set({ skin: 'white' });
     broadcastSettings();
   });
 

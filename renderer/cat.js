@@ -1439,9 +1439,11 @@
       el.appendChild(c);
     } else if (opts.giftId) {
       const cv = document.createElement('canvas');
-      cv.width = 18; cv.height = 18;
+      // 9x9 art + the sticker keyline/rim rings (2 cells each side) at px 2
+      cv.width = 26; cv.height = 26;
       cv.className = 'ic';
-      drawGift(cv.getContext('2d'), opts.giftId, 0, 0, 2);
+      cv.style.width = '26px'; cv.style.height = '26px'; // rings need the room
+      drawGift(cv.getContext('2d'), opts.giftId, 4, 4, 2);
       el.appendChild(cv);
     } else {
       el.appendChild(mkIcon(opts.icon || 'dot', opts.iconColor));

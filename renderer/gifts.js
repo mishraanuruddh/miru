@@ -16,33 +16,61 @@
     star:      { name: 'A fallen star', rarity: 'rare', color: '#fff3b0', alt: '#f2c14e' },
   };
 
-  // X = color, o = alt, . = empty
+  // X = color, o = alt, # = ink detail, . = empty.
+  // Silhouettes stay CONNECTED (4-adjacent) — the sticker keyline wraps
+  // every island, so stray dots become blobs.
   const ART = {
-    leaf:      ['....X....', '...XX....', '..XXX....', '.XXXXX...', '.XXoXX...', '..XoX....', '...o.....', '..o......', '.........'],
+    leaf:      ['....X....', '...XXX...', '..XXXXX..', '.XXX#XXX.', '.XXX#XXX.', '..XX#XX..', '...X#X...', '....#....', '....#....'],
     sock:      ['..XXX....', '..XXX....', '..XXX....', '..XXXo...', '.XXXXo...', 'XXXXX....', 'XXXX.....', '.XX......', '.........'],
-    bottlecap: ['.o.o.o...', 'oXXXXXo..', '.XXoXX...', 'oXXXXXo..', '.o.o.o...', '.........', '.........', '.........', '.........'],
-    acorn:     ['..ooo....', '.ooooo...', '.XXXXX...', '..XXX....', '..XXX....', '...X.....', '.........', '.........', '.........'],
+    bottlecap: ['.........', '..XXXXX..', '.XXoooXX.', '.XoXXXoX.', '.XXoooXX.', '..XXXXX..', '.........', '.........', '.........'],
+    acorn:     ['....#....', '..ooooo..', '.ooooooo.', '.XXXXXXX.', '.XXXXXXX.', '..XXXXX..', '...XXX...', '.........', '.........'],
     ribbon:    ['.XX..XX..', 'XXXXXXXX.', '.XXooXX..', 'XXXXXXXX.', '.XX..XX..', '.........', '.........', '.........', '.........'],
-    feather:   ['.......X.', '.....XXX.', '....XXX..', '...XXXo..', '..XXXo...', '.XXXo....', '.Xo......', 'o........', '.........'],
-    yarn:      ['..XXXX...', '.XoXXoX..', 'XXoXXoXX.', 'XXXooXXX.', 'XXoXXoXX.', '.XoXXoX..', '..XXXX...', '......o..', '.......o.'],
-    flower:    ['..o.o....', '.oXoXo...', '..oXo....', '.oXoXo...', '..o.o....', '...X.....', '...X.....', '..XX.....', '.........'],
-    beetle:    ['..XXX....', '.XXoXX...', '.XoXoX...', '.XXoXX...', '.XXXXX...', '..X.X....', '.X...X...', '.........', '.........'],
-    mouse:     ['.........', '..XX.....', '.XXXX..o.', 'XXXXXX.o.', 'XXoXXXo..', '.XXXX....', '..X.X....', '.........', '.........'],
-    fish:      ['.........', '...XXX...', '..XXXXXo.', '.XoXXXXo.', '..XXXXXo.', '...XXX.o.', '.....o...', '.........', '.........'],
-    star:      ['....X....', '....X....', '..XXXXX..', '...XXX...', '..XX.XX..', '.X.....X.', '.........', '.........', '.........'],
+    feather:   ['.......X.', '.....XXX.', '....XXX..', '...XXX#..', '..XXX#...', '.XXX#....', '.X#......', '#........', '.........'],
+    yarn:      ['..XXXX...', '.XoXXoX..', 'XXoXXoXX.', 'XXXooXXX.', 'XXoXXoXX.', '.XoXXoX..', '..XXXX##.', '.........', '.........'],
+    flower:    ['..XXX....', '.XXoXX...', '.XoooX...', '.XXoXX...', '..XXX....', '...#.....', '..X#.....', '...#.....', '.........'],
+    beetle:    ['..ooo....', '.XXXXX...', '.XX#XX...', '.XX#XX...', '.XX#XX...', '..XXX....', '..#.#....', '.........', '.........'],
+    mouse:     ['.........', '.XX..X...', '.XXXXXX..', 'XXXXXXX#.', 'XX#XXXX#.', '.XXXXX#..', '..X..X...', '.........', '.........'],
+    fish:      ['.........', '...XXX...', '..XXXXX..', '.X#XXXXo.', '..XXXXXo.', '...XXX...', '.........', '.........', '.........'],
+    star:      ['....X....', '...XXX...', '.XXXXXXX.', '..XXXXX..', '..XXoXX..', '.XXX.XXX.', '.........', '.........', '.........'],
   };
 
   const RARITY_WEIGHT = { common: 60, uncommon: 30, rare: 10 };
 
+  const INK = '#181818', RIM = '#fefefe';
+
+  // Die-cut sticker treatment to match the cat: a dark keyline is
+  // auto-drawn hugging the art, then a white rim wraps the keyline.
+  // Both rings extend up to two cells beyond the 9x9 grid.
   function drawGift(ctx, id, x, y, px) {
     const g = GIFTS[id];
     const art = ART[id];
     if (!g || !art) return;
+    const solid = (c, r) =>
+      r >= 0 && r < art.length && c >= 0 && c < art[r].length && art[r][c] !== '.';
+    const near = (c, r, f) => f(c - 1, r) || f(c + 1, r) || f(c, r - 1) || f(c, r + 1);
+    const keySet = new Set();
+    for (let r = -1; r <= art.length; r++) {
+      for (let c = -1; c <= art[0].length; c++) {
+        if (!solid(c, r) && near(c, r, solid)) keySet.add(c + ',' + r);
+      }
+    }
+    const inKey = (c, r) => keySet.has(c + ',' + r) || solid(c, r);
+    ctx.fillStyle = RIM;
+    for (let r = -2; r <= art.length + 1; r++) {
+      for (let c = -2; c <= art[0].length + 1; c++) {
+        if (!inKey(c, r) && near(c, r, inKey)) ctx.fillRect(x + c * px, y + r * px, px, px);
+      }
+    }
+    ctx.fillStyle = INK;
+    for (const key of keySet) {
+      const [c, r] = key.split(',').map(Number);
+      ctx.fillRect(x + c * px, y + r * px, px, px);
+    }
     for (let r = 0; r < art.length; r++) {
       for (let c = 0; c < art[r].length; c++) {
         const ch = art[r][c];
         if (ch === '.') continue;
-        ctx.fillStyle = ch === 'X' ? g.color : g.alt;
+        ctx.fillStyle = ch === 'X' ? g.color : ch === 'o' ? g.alt : INK;
         ctx.fillRect(x + c * px, y + r * px, px, px);
       }
     }
