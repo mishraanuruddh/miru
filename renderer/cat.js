@@ -1,8 +1,11 @@
 'use strict';
 /* global Sprites, PixelFont, PixelIcons, CatGifts, CatAudio, miru */
 (async function () {
-  const { framesFor, SKINS, drawCat } = Sprites;
-  let FRAMES = framesFor('kawaii');
+  const { drawCat } = Sprites;
+  let PACK = Sprites.getPack('sticker');
+  let FRAMES = PACK.frames;
+  let RESOLVED = null; // every requestable pose, fallbacks applied
+  let CYCLES = null;   // animation cadences (ms), pack may retune
   const { drawIcon } = PixelIcons;
   const { GIFTS, drawGift } = CatGifts;
 
@@ -21,11 +24,46 @@
 
   // ------------------------------------------------------------- settings
   let settings = await miru.getSettings();
+  applyPack();
   let skin = resolveSkin();
-  FRAMES = framesFor(settings.spriteStyle);
 
   function resolveSkin() {
-    return Sprites.resolveSkin(null, settings.skin, settings.customColors);
+    return Sprites.resolveSkin(PACK, settings.skin, settings.customColors);
+  }
+
+  // the active sprite pack: everything she looks like flows from here. A
+  // dangling id (a user pack deleted from disk) falls back to the default
+  // look without writing anything back.
+  function applyPack() {
+    PACK = Sprites.getPack(settings.spritePack) || Sprites.getPack('sticker');
+    FRAMES = PACK.frames;
+    CYCLES = { run: 90, zoomies: 80, knead: 320, groom: 430, scroll: 380, ...(PACK.cycles || {}) };
+    // Action poses degrade to the nearest thing the pack does have, ending
+    // at sit — a three-frame pack still works everywhere. Ritual poses stay
+    // null when absent: absence disables the ritual, never fakes it.
+    const F = FRAMES;
+    const pick = (...ids) => { for (const id of ids) if (F[id]) return F[id]; return F.sit; };
+    RESOLVED = {
+      sit: F.sit,
+      sit_tail_mid: pick('sit_tail_mid', 'sit'),
+      sit_tail_up: pick('sit_tail_up', 'sit_tail_mid', 'sit'),
+      hang: pick('hang', 'sit'),
+      run_a: pick('run_a', 'sit'),
+      run_b: pick('run_b', 'run_a', 'sit'),
+      crouch: pick('crouch', 'sit'),
+      leap: pick('leap', 'run_a', 'sit'),
+      knead_l: pick('knead_l', 'sit'),
+      knead_r: pick('knead_r', 'knead_l', 'sit'),
+      celebrate: pick('celebrate', 'sit_tail_up', 'sit'),
+      stretch_up: pick('stretch_up', 'sit'),
+      loaf: pick('loaf', 'sit'),
+      loaf_twitch: F.loaf_twitch || null,
+      sit_groom1: F.sit_groom1 || null,
+      sit_groom2: F.sit_groom2 || null,
+      sit_flick: F.sit_flick || null,
+      sit_wrap: F.sit_wrap || null,
+      giftPresent: (PACK.anims && PACK.anims.giftPresent && F[PACK.anims.giftPresent.frame]) || null,
+    };
   }
 
   function applySound() {
@@ -36,8 +74,8 @@
 
   miru.onSettings((s) => {
     settings = s;
+    applyPack();
     skin = resolveSkin();
-    FRAMES = framesFor(settings.spriteStyle);
     applySound();
     if (st.menu.open && panelEl) renderMenuDom(); // live task/app updates
   });
@@ -76,6 +114,7 @@
     stretchUntil: -1e9,
     hopUntil: -1e9,
     wakeUntil: -1e9,    // surprise "!" on wake
+    giftPoseUntil: -1e9,
     sleepingSince: 0,
     hunt: { phase: 'none', dir: 1 },
     drag: { active: false, vx: 0, vy: 0, vxS: 0, prevVxS: 0, sy: 1, springV: 0, shear: 0, wobble: 0, swing: 0, swingV: 0, releasedT: -1e9 },
@@ -274,6 +313,7 @@
     CatAudio.tada();
     spawnSparkles(rarity === 'rare' ? 14 : 6);
     st.hopUntil = now() + 1200;
+    st.giftPoseUntil = now() + 2600; // packs may bow over the catch
   });
   miru.getInbox().then((items) => { st.inbox = items || []; });
   miru.onMenuToggle(() => toggleMenu());
@@ -651,7 +691,7 @@
     }
     // grooming ritual: idle cats keep themselves clean (harness runs poke
     // st.groomUntil directly — ambient fires would eat frame-assert windows)
-    if (ambientEnabled() && st.mode === 'idle' && t > st.nextGroomT && FRAMES.sit_groom1) {
+    if (ambientEnabled() && st.mode === 'idle' && t > st.nextGroomT && RESOLVED.sit_groom1) {
       st.groomUntil = t + 2800;
       st.nextGroomT = t + 45000 + Math.random() * 75000;
     }
@@ -749,30 +789,33 @@
   // ---------------------------------------------------------------- render
   function pickFrame() {
     const t = now();
+    const R = RESOLVED;
     switch (st.mode) {
-      case 'drag': return { f: FRAMES.hang };
-      case 'listen': return { f: FRAMES.sit_tail_up }; // ears-up attentive pose
-      case 'hunt': return { f: Math.floor(t / 90) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: st.hunt.dir < 0 };
-      case 'pounce': return { f: FRAMES.crouch || FRAMES.sit, flip: st.hunt.dir < 0 };
-      case 'leap': return { f: FRAMES.leap, flip: st.hunt.dir < 0 };
-      case 'caught': return { f: FRAMES.knead_l };
-      case 'celebrate': return { f: FRAMES.celebrate };
-      case 'stretch': return { f: FRAMES.stretch_up };
-      case 'sleep': return { f: t < st.dreamTwitchUntil && FRAMES.loaf_twitch ? FRAMES.loaf_twitch : FRAMES.loaf };
+      case 'drag': return { f: R.hang };
+      case 'listen': return { f: R.sit_tail_up }; // ears-up attentive pose
+      case 'hunt': return { f: Math.floor(t / CYCLES.run) % 2 ? R.run_a : R.run_b, flip: st.hunt.dir < 0 };
+      case 'pounce': return { f: R.crouch, flip: st.hunt.dir < 0 };
+      case 'leap': return { f: R.leap, flip: st.hunt.dir < 0 };
+      case 'caught': return { f: R.knead_l };
+      case 'celebrate': return { f: R.celebrate };
+      case 'stretch': return { f: R.stretch_up };
+      case 'sleep': return { f: t < st.dreamTwitchUntil && R.loaf_twitch ? R.loaf_twitch : R.loaf };
       case 'overheat':
-      case 'knead': return { f: Math.floor(t / 320) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
-      case 'zoomies': return { f: Math.floor(t / 80) % 2 ? FRAMES.run_a : FRAMES.run_b, flip: Math.floor(t / 700) % 2 === 0 };
-      case 'scroll': return { f: Math.floor(t / 380) % 2 ? FRAMES.knead_l : FRAMES.knead_r };
+      case 'knead': return { f: Math.floor(t / CYCLES.knead) % 2 ? R.knead_l : R.knead_r };
+      case 'zoomies': return { f: Math.floor(t / CYCLES.zoomies) % 2 ? R.run_a : R.run_b, flip: Math.floor(t / 700) % 2 === 0 };
+      case 'scroll': return { f: Math.floor(t / CYCLES.scroll) % 2 ? R.knead_l : R.knead_r };
       default: {
-        if (t < st.groomUntil && FRAMES.sit_groom1) {
-          return { f: Math.floor(t / 430) % 2 ? FRAMES.sit_groom2 : FRAMES.sit_groom1 };
+        // a fresh catch: present it the way this pack knows how
+        if (st.shownGift && t < st.giftPoseUntil && R.giftPresent) return { f: R.giftPresent };
+        if (t < st.groomUntil && R.sit_groom1) {
+          return { f: Math.floor(t / CYCLES.groom) % 2 ? (R.sit_groom2 || R.sit_groom1) : R.sit_groom1 };
         }
-        if (t < st.earFlickUntil && FRAMES.sit_flick) return { f: FRAMES.sit_flick };
+        if (t < st.earFlickUntil && R.sit_flick) return { f: R.sit_flick };
         // nodding off: tuck into a loaf before sleep proper
-        if (settings.reactions.sleep && st.idleSec > 232) return { f: FRAMES.loaf };
+        if (settings.reactions.sleep && st.idleSec > 232) return { f: R.loaf };
         // long calm idle: the tail wraps around the front paws, content
-        if (st.modeT > 25 && FRAMES.sit_wrap) return { f: FRAMES.sit_wrap };
-        const tails = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
+        if (st.modeT > 25 && R.sit_wrap) return { f: R.sit_wrap };
+        const tails = [R.sit, R.sit_tail_mid, R.sit_tail_up, R.sit_tail_mid];
         return { f: tails[st.tailIdx] };
       }
     }
@@ -922,12 +965,12 @@
       mouth: mouthStyle(),
       blush: st.mode === 'pet' || sinceBoop < 900,
       faceInk: faceInk(),
-      freckles: settings.spriteStyle !== 'classic',
+      freckles: !!PACK.meta.freckles,
       tilt: t < st.tiltUntil ? st.tiltDir : 0,
       // pendulum angle -> sideways cells at the bottom row of the frame
       swing: frame.pivot != null ? Math.tan(d.swing) * (frame.h - 1 - frame.pivot) : 0,
       style: settings.skinStyle || 'plain',
-      overrides: settings.pixelOverrides || null,
+      overrides: (settings.pixelOverrides || {})[PACK.meta.id] || null,
     });
     ctx.restore();
 
@@ -1903,7 +1946,10 @@
         panelBox: rect(pr),
       };
     })() : null,
-    overridesCount: settings.pixelOverrides ? Object.keys(settings.pixelOverrides).length : 0,
+    overridesCount: (() => {
+      const ov = (settings.pixelOverrides || {})[PACK.meta.id];
+      return ov ? Object.keys(ov).length : 0;
+    })(),
     bond: { xp: st.bond.xp, level: st.bond.level, gifts: (st.bond.gifts || []).length, streak: st.bond.streak, daysTogether: st.bond.daysTogether },
     shownGift: st.shownGift ? st.shownGift.id : null,
     tasksOpen: (settings.tasks || []).filter((t) => !t.done).length,
@@ -1936,6 +1982,7 @@
       };
     })() : null,
     skin: settings.skin,
+    pack: PACK.meta.id,
   });
 
   // a named cat introduces itself once per launch

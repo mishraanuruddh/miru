@@ -1,12 +1,27 @@
 'use strict';
 /* global Sprites, CatPalette, miru */
 (async function () {
-  const { framesFor, SKINS, drawCat } = Sprites;
-  let FRAMES = framesFor('kawaii');
+  const { SKINS, drawCat, getPack, listPacks } = Sprites;
   const { skinFromImageData, paletteToSkin, capFaceOverrides } = CatPalette;
   let settings = await miru.getSettings();
-  FRAMES = framesFor(settings.spriteStyle);
+  let PACK = getPack(settings.spritePack) || getPack('sticker');
+  let FRAMES = PACK.frames;
   let info = await miru.appInfo();
+
+  function applyPack() {
+    PACK = getPack(settings.spritePack) || getPack('sticker');
+    FRAMES = PACK.frames;
+  }
+  // painted pixels belong to the pack they were drawn on
+  function ovSlice() { return (settings.pixelOverrides || {})[PACK.meta.id] || {}; }
+  function ovSave(slice) {
+    const all = { ...(settings.pixelOverrides || {}) };
+    if (slice && Object.keys(slice).length) all[PACK.meta.id] = slice;
+    else delete all[PACK.meta.id];
+    const value = Object.keys(all).length ? all : null;
+    settings.pixelOverrides = value;
+    save({ pixelOverrides: value });
+  }
 
   const $ = (id) => document.getElementById(id);
   const save = (partial) => miru.setSettings(partial).then((s) => { settings = s; });
@@ -36,7 +51,7 @@
       eye: { style: blink ? 'closed' : 'open', gx: 1, gy: 1 },
       mouth: 'none',
       style: settings.skinStyle || 'plain',
-      overrides: withOverrides ? settings.pixelOverrides || null : null,
+      overrides: withOverrides ? ovSlice() : null,
     });
   }
 
@@ -57,19 +72,28 @@
   $('catName').value = settings.catName || '';
   $('catName').addEventListener('input', () => save({ catName: $('catName').value }));
 
-  document.querySelectorAll('#lookSeg button').forEach((b) => {
-    b.classList.toggle('active', b.dataset.v === (settings.spriteStyle || 'kawaii'));
-    b.addEventListener('click', () => {
-      document.querySelectorAll('#lookSeg button').forEach((x) => x.classList.remove('active'));
-      b.classList.add('active');
-      settings.spriteStyle = b.dataset.v;
-      FRAMES = framesFor(settings.spriteStyle);
-      save({ spriteStyle: b.dataset.v });
-      drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
-      drawEditor();
-      renderPresets();
-    });
-  });
+  // one button per registered pack — user packs appear here on their own
+  function renderLookSeg() {
+    const seg = $('lookSeg');
+    seg.innerHTML = '';
+    for (const p of listPacks()) {
+      const b = document.createElement('button');
+      b.textContent = (p.meta.name || p.meta.id).toUpperCase();
+      b.title = p.meta.author ? `by ${p.meta.author}` : '';
+      b.classList.toggle('active', p.meta.id === PACK.meta.id);
+      b.addEventListener('click', () => {
+        settings.spritePack = p.meta.id;
+        applyPack();
+        save({ spritePack: p.meta.id });
+        renderLookSeg();
+        drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
+        drawEditor();
+        renderPresets();
+      });
+      seg.appendChild(b);
+    }
+  }
+  renderLookSeg();
 
   document.querySelectorAll('#styleSeg button').forEach((b) => {
     b.classList.toggle('active', b.dataset.v === (settings.skinStyle || 'plain'));
@@ -85,12 +109,14 @@
   function applyClusters(clusters, forceBodyHex) {
     const skin = paletteToSkin(clusters, { forceBodyHex });
     if (!skin) return;
-    const ov = skin._mode === 'cap' ? capFaceOverrides(skin) : null;
+    // auto face markings target the classic 24-wide head grid; other packs
+    // keep their paint untouched and the user refines in the editor
+    const ov = skin._mode === 'cap' && FRAMES.sit.w === 24 ? capFaceOverrides(skin) : null;
     delete skin._mode;
     settings.skin = 'custom';
     settings.customColors = skin;
-    settings.pixelOverrides = ov;
-    save({ skin: 'custom', customColors: skin, pixelOverrides: ov });
+    save({ skin: 'custom', customColors: skin });
+    ovSave(ov || {});
     renderPresets();
     refreshColors();
     renderSwatches(clusters, skin.body);
@@ -213,13 +239,14 @@
   refreshColors();
 
   // ------------------------------------------------------------ pixel editor
-  const PIX = 13; // editor cell size
+  // editor cell size — wide user packs shrink cells instead of overflowing
+  const PIX = Math.max(6, Math.min(13, Math.floor(400 / FRAMES.sit.w)));
   const editCanvas = $('pixedit');
   const editCtx = editCanvas.getContext('2d');
   let brush = '#867e74';
   let eraser = false;
 
-  function overrides() { return settings.pixelOverrides || {}; }
+  function overrides() { return ovSlice(); }
 
   function drawEditor() {
     // canvas tracks the current frame's grid (kawaii is 30-wide, classic 24)
@@ -241,11 +268,14 @@
       overrides: overrides(),
     });
     // eye sockets marked faintly so markings can be planned around them
+    // (skipped for packs whose sit bakes the face into the art)
     const e = FRAMES.sit.eyes;
-    editCtx.strokeStyle = 'rgba(255,212,0,0.5)';
-    editCtx.lineWidth = 1;
-    for (const k of ['l', 'r']) {
-      editCtx.strokeRect(e[k][0] * PIX + 0.5, e[k][1] * PIX + 0.5, e.size * PIX - 1, e.size * PIX - 1);
+    if (e && e.l && e.r) {
+      editCtx.strokeStyle = 'rgba(255,212,0,0.5)';
+      editCtx.lineWidth = 1;
+      for (const k of ['l', 'r']) {
+        editCtx.strokeRect(e[k][0] * PIX + 0.5, e[k][1] * PIX + 0.5, e.size * PIX - 1, e.size * PIX - 1);
+      }
     }
   }
 
@@ -259,8 +289,7 @@
     const ov = { ...overrides() };
     if (erase || eraser) delete ov[`${x},${y}`];
     else ov[`${x},${y}`] = brush;
-    settings.pixelOverrides = ov;
-    save({ pixelOverrides: ov });
+    ovSave(ov);
     drawEditor();
     drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
   }
@@ -290,8 +319,7 @@
   $('brushColor').addEventListener('input', () => { brush = $('brushColor').value; eraser = false; $('eraserBtn').textContent = 'ERASER OFF'; renderBrushes(); });
   $('eraserBtn').addEventListener('click', () => { eraser = !eraser; $('eraserBtn').textContent = eraser ? 'ERASER ON' : 'ERASER OFF'; });
   $('clearPixels').addEventListener('click', () => {
-    settings.pixelOverrides = null;
-    save({ pixelOverrides: null });
+    ovSave({}); // clears this pack's paint only
     drawEditor();
     drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
   });

@@ -751,7 +751,8 @@ async function runScenarios(ctx) {
   await scenario('pixel overrides: painted markings reach the renderer', async () => {
     const { capFaceOverrides } = require('../renderer/palette');
     const ov = capFaceOverrides({ body: '#d0cbc1', headL: '#867e74' });
-    store.set({ pixelOverrides: ov });
+    // paint belongs to a pack now; the active pack's slice is what renders
+    store.set({ pixelOverrides: { sticker: ov } });
     broadcastSettings();
     await waitFor(async () => (await debug()).overridesCount > 10, 'overrides applied');
     await wait(200);
@@ -1417,19 +1418,26 @@ async function runScenarios(ctx) {
     broadcastSettings();
   });
 
-  await scenario('sprite styles: kawaii default, classic backup switches', async () => {
-    const dK = await debug();
-    const kawaiiH = dK.catBBox.h;
+  await scenario('sprite packs: sticker default, classic + old kawaii switch', async () => {
+    const dS = await debug();
+    assert(dS.pack === 'sticker', 'default pack: ' + dS.pack);
+    const stickerH = dS.catBBox.h;
     await wait(100);
-    await cap('kawaii-idle');
-    store.set({ spriteStyle: 'classic' });
+    await cap('sticker-idle');
+    store.set({ spritePack: 'classic' });
     broadcastSettings();
-    await waitFor(async () => Math.abs((await debug()).catBBox.h - kawaiiH) > 4, 'classic frame height differs');
+    await waitFor(async () => (await debug()).pack === 'classic', 'classic pack active');
+    await waitFor(async () => Math.abs((await debug()).catBBox.h - stickerH) > 4, 'classic frame height differs');
     await wait(150);
     await cap('classic-idle');
-    store.set({ spriteStyle: 'kawaii' });
+    store.set({ spritePack: 'kawaii' });
     broadcastSettings();
-    await waitFor(async () => Math.abs((await debug()).catBBox.h - kawaiiH) < 2, 'back to kawaii');
+    await waitFor(async () => (await debug()).pack === 'kawaii', 'kawaii pack active');
+    await wait(150);
+    await cap('kawaii-idle');
+    store.set({ spritePack: 'sticker' });
+    broadcastSettings();
+    await waitFor(async () => Math.abs((await debug()).catBBox.h - stickerH) < 2, 'back to sticker');
   });
 
   await scenario('skin swap: calico renders', async () => {
