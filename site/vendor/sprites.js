@@ -16,6 +16,7 @@
     P: 'pawUp', // raised paw: auto-shaded vs the fur so it reads on solid cats
     G: 'marking', // gray patches: collar, cheek dots, tail + haunch shading
     D: 'shading', // deep creases: inner ear, under the stretch arch
+    p: 'tongue', // the grooming lick — pink on every coat
   };
 
   // ------------------------------------------------------------------ skins
@@ -430,6 +431,7 @@
           const pl = lum(skin.paws);
           color = hex3(mixRgb(hexToRgb(skin.paws), pl > 140 ? [0, 0, 0] : [255, 255, 255], pl > 140 ? 0.2 : 0.3));
         }
+        if (!color && region === 'tongue') color = '#d6a4a5'; // pink for all coats
         if (!color) color = '#ff00ff';
         if (style !== 'plain' && STRIPEABLE[region]) {
           if (style === 'tabby' && (x + y * 2) % 6 < 2) color = patternColor;
@@ -803,48 +805,73 @@
     rows: [...KFLICK_EARS, ...KFRAMES.loaf.rows.slice(4)],
   };
 
-  // grooming: a raised foreleg (P = shaded paw) — groom1 licks it at the
-  // mouth, groom2 wipes it up over the ear
+  // grooming: the two-frame lick cycle transcribed cell-for-cell from the
+  // licking/licking_in charts in pixel-cat-images/sprites.json — head nods
+  // one pixel onto the raised paw, pink tongue out, then back at rest.
+  // Faces are baked (blissful closed eyes), registered on a shared canvas.
   KFRAMES.sit_groom1 = {
-    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(merge(KSIT, overlay(KBLANK, [
-      [11, K30('................wPPw')],
-      [12, K30('................wPPw')],
-      [13, K30('................wPPw')],
-      [14, K30('................wPPw')],
-      [15, K30('................wPPw')],
-      [16, K30('................wPPw')],
-      [17, K30('................wPPw')],
-      [18, K30('................wPPw')],
-      [22, K30('...............wCCCw')],
-      [23, K30('...............wCCCw')],
-      [24, K30('................wCCw')],
-    ])), KTAIL_REST),
+    w: 29, h: 27, eyes: {}, mouth: null,
+    rows: [
+      '.............................',
+      '.................ww.....ww...',
+      '................wLw....wRw...',
+      '...............wLiw...wRiw...',
+      '..............wLiiwwwwwRiw...',
+      '..............wLiiwRRRRwiw...',
+      '.............wLLLLLRRRRRww...',
+      '.............wLLLLLRRRRRRRw..',
+      '............wLLLLLLRRRRRRRw..',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLwwwMMwwwMwww',
+      '........wwwwLLLLLGMMMMMMGMw..',
+      '...........wLLLLLMMMMwMFFFwww',
+      '........wwwwLLLLLMMMwMwFFww..',
+      '............wwLLLMMMMppFww...',
+      '.wwww........wwwLMMMMpMFG....',
+      'wttttw........wGwwwwwwBFFw...',
+      'wttttw......wwCCCGGGGGwFFw...',
+      'wTTTTw.....wCCCCCBBBBBwGGw...',
+      '.wTTTTw...wCCCCCCBBBBBwww....',
+      '.wTTTTww..wCCCCCCBBwBBw......',
+      '..wTTTTwwwCCCCCCCBwBBBw......',
+      '..wTTTTTTwFFFFwFFwBBBBw......',
+      '...wwGTTTwFFFFGwFwwwBBw......',
+      '.....wGGGwFFFFGwwFBBwBw......',
+      '......wwGwFFFFFGwFGGwBw......',
+      '........wwwwwwwwwwwwwww......',
+    ],
   };
   KFRAMES.sit_groom2 = {
-    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(merge(KSIT, overlay(KBLANK, [
-      [1,  K30('.....................PPw')],
-      [2,  K30('....................wPPw')],
-      [3,  K30('....................wPPw')],
-      [4,  K30('....................wPPw')],
-      [5,  K30('....................wPPw')],
-      [6,  K30('....................wPPw')],
-      [7,  K30('....................wPPw')],
-      [8,  K30('....................wPPw')],
-      [9,  K30('....................wPPw')],
-      [10, K30('....................wPPw')],
-      [11, K30('....................wPPw')],
-      [12, K30('....................wPPw')],
-      [13, K30('....................wPPw')],
-      [14, K30('....................wPPw')],
-      [15, K30('....................wPPw')],
-      [16, K30('....................wPPw')],
-      [17, K30('....................wPPw')],
-      [22, K30('...............wCCCw')],
-      [23, K30('...............wCCCw')],
-      [24, K30('................wCCw')],
-    ])), KTAIL_REST),
+    w: 29, h: 27, eyes: {}, mouth: null,
+    rows: [
+      '................ww.....ww....',
+      '...............wLw....wRw....',
+      '..............wLiw...wRiw....',
+      '.............wLiiwwwwwRiw....',
+      '.............wLiiwLRRRwiw....',
+      '............wLLLLLLRRRRww....',
+      '............wLLLLLLRRRRRRw...',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLwwwRRwwwRwww',
+      '........wwwwLLLLLGMMMMMMGMw..',
+      '...........wLLLLLMMMMwMMMMwww',
+      '........wwwwLLLLLMMMwMwFFFw..',
+      '............wLLLLMMMMMMFFw...',
+      '.............wLLLMMMMMMFww...',
+      '.wwww.........wwLMMMMMMFG....',
+      'wttttw........wGwwwwwwBFFw...',
+      'wttttw......wwCCCGGGGGwFFw...',
+      'wTTTTw.....wCCCCCBBBBBwGGw...',
+      '.wTTTTw...wCCCCCCBBBBBwww....',
+      '.wTTTTww..wCCCCCCBBwBBw......',
+      '..wTTTTwwwCCCCCCCBwBBBw......',
+      '..wTTTTTTwFFFFwFFwBBBBw......',
+      '...wwGTTTwFFFFGwFwwwBBw......',
+      '.....wGGGwFFFFGwwFBBwBw......',
+      '......wwGwFFFFFGwFGGwBw......',
+      '........wwwwwwwwwwwwwww......',
+    ],
   };
 
   // contentment: tail sweeps around the front and rests over the paws
@@ -880,12 +907,14 @@
     ])),
   };
 
-  // run cycle transcribed cell-for-cell from the run_extended/run_crossing
-  // charts in pixel-cat-images/sprites.json (mirrored to face right, like
-  // the engine expects) — full stride and mid-gather, striped tail, baked
-  // faces since these alternate every ~80ms
+  // run cycle transcribed cell-for-cell from the harmonized run_extended /
+  // run_crossing charts in pixel-cat-images/sprites.json (mirrored to face
+  // right, like the engine expects) — full stride and mid-gather, striped
+  // tail, baked faces since these alternate every ~80ms. The pair shares a
+  // face-aligned canvas, so the extended stride rides airborne while the
+  // gather touches down: the gallop bob is in the art.
   KFRAMES.run_a = {
-    w: 30, h: 20, eyes: {}, mouth: null, side: true,
+    w: 30, h: 22, eyes: {}, mouth: null, side: true,
     rows: [
       '...............ww.....ww......',
       '...............wLw....wRw.....',
@@ -897,35 +926,39 @@
       '....wGww......wLLLLLLRRRRRRw..',
       '....wwTw......wLLLwLLRRwRRRw..',
       '....wTTww....wLLLLwLLRRwRRRw..',
-      '.....wwGw..wwwBBBGwLLRRwGRRRww',
-      '......wwGw...wBBBLLLLwRRRRRRw.',
-      '.......wwGwwwBwBBLLLwRwRRRRw..',
-      '........wwwTTBBwBLLLLRRRRRw...',
-      '.........wTTTBBBwLLLLRRRRw....',
-      '........wwTTTBBBBwwwwwwwww....',
+      '.....wwGw..wwwLLLGwLLRRwGRRRww',
+      '......wwGw...wLLLLLLLwRRRRRRw.',
+      '.......wwGwwwLwLLLLLwRwRRRRw..',
+      '........wwwBBLLwLLLLLRRRRRw...',
+      '.........wBBBLLLwLLLLRRRRw....',
+      '........wwFFFFFFFwwwwwwwww....',
       '......w..wwFFGFFFGFFFww...ww..',
       '........wFFwwwGGGwwwFFFwG...G.',
       '........wFw.........wFFw..w...',
       '.........w...........ww.......',
+      '..............................',
+      '..............................',
     ],
   };
   KFRAMES.run_b = {
-    w: 30, h: 20, eyes: {}, mouth: null, side: true,
+    w: 30, h: 22, eyes: {}, mouth: null, side: true,
     rows: [
+      '..............................',
+      '..............................',
       '...............ww......ww.....',
       '...............wLw.....wRw....',
       'wwww...........wiLwwwwwwiRw...',
-      'wtttw..........wiwLLLLRwiRw...',
-      '.wtww.........wwwLLLLLRRRRRw..',
-      '.wwtw.........wLLLLLLLRRRRRw..',
-      '.wtww.........wLLLLLLLRRRRRRw.',
-      '.www........wwLLLLwLLLRwRRRRw.',
-      '.wTTw........wLLLGwLLLRwGRRRww',
+      'wtttw..........wGwLLLRRwGRw...',
+      '.wtww.........wwwLLLLRRRRRRw..',
+      '.wwTw.........wLLLLLLRRRRRRw..',
+      '.wTww.........wLLLwLLRRwRRRRw.',
+      '.www........wwLLLLwLLRRwRRRRw.',
+      '.wTTw........wLLLGwLLRRwGRRRww',
       '..Gwww......wwLLLLLLLwRRRRRRw.',
-      '..wwwTwwwwwwBLwLLLLLwLwRRRRRww',
-      '...wwGGwwTTBBLwGLLLLLLRRRRRw..',
-      '....wwwwTTTBBLLwwLLLLLRRRRw...',
-      '.......wTTTBBLLLwwwwwwwwww....',
+      '..wwwTwwwwwwBLwLLLLLwRwRRRRRww',
+      '...wwGGwwTTBBLwGLLLLLRRRRRRw..',
+      '....wwwwBBBBBLLwwLLLLRRRRRw...',
+      '.......wFFFFFFFFwwwwwwwwww....',
       '.......wFFFFFFFFFwGGGGw.......',
       '........wFFGGFwFFFwwFw........',
       '.........wGwGwwGGFFFw.........',
