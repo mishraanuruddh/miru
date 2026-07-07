@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('miru', {
   askAnswer: (qid, index) => ipcRenderer.send('ask:answer', { qid, index }),
   askOpen: (qid) => ipcRenderer.send('ask:open', { qid }),
   askDismiss: (qid) => ipcRenderer.send('ask:dismiss', { qid }),
+  askText: (qid, text) => ipcRenderer.send('ask:text', { qid, text }),
   askTest: () => ipcRenderer.send('ask:test'),
   onConfirm: on('confirm'),
   onConfirmClear: on('confirm-clear'),

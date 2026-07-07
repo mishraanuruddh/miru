@@ -30,6 +30,7 @@
       transition: transform 0.18s cubic-bezier(0.34, 1.45, 0.64, 1), opacity 0.13s ease-out;
     }
     .panel.open { transform: translateX(-50%) scale(1); opacity: 1; }
+    .panel.notrans { transition: none !important; }
     .panel::after { /* little pointer toward the cat */
       content: '';
       position: absolute;
@@ -115,6 +116,30 @@
     }
     .addbar button:active { transform: scale(0.96); }
     .empty { padding: 10px 8px; font-size: 11.5px; color: rgba(255,255,255,0.35); }
+
+    /* ---------------- ask panel: agent questions, same language as the menu */
+    .panel.ask { width: 316px; display: flex; flex-direction: column; box-sizing: border-box; }
+    .ask-q {
+      padding: 2px 8px 8px;
+      font-size: 12.5px; line-height: 1.45; color: #f2f1f6;
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      overflow-y: auto; flex: 0 1 auto;
+    }
+    .row.opt .num { flex: 0 0 auto; width: 12px; text-align: center; font-size: 11px; font-weight: 700; color: #ffd400; }
+    .row.opt .lb { white-space: normal; }
+    .row.opt.disabled { cursor: default; opacity: 0.55; }
+    .row.opt.disabled:hover { background: none; }
+    .ask-foot { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 2px; }
+    .ask-status { font-size: 10.5px; color: rgba(255,255,255,0.42); }
+    .ask-btns { display: flex; gap: 6px; margin-left: auto; }
+    .ask-btn {
+      background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.75);
+      border: 0.5px solid rgba(255,255,255,0.12); border-radius: 7px;
+      font: 500 10.5px system-ui;
+      padding: 4px 9px; cursor: pointer;
+    }
+    .ask-btn:hover { background: rgba(255,255,255,0.14); }
+    .ask-btn:active { transform: scale(0.96); }
   </style>
 </head>
 <body>

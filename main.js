@@ -415,7 +415,7 @@ function askResolve(a, result, skipEnd) {
     try { a.res.end(JSON.stringify({ ok: true, ...result, elapsedMs: Date.now() - a.t0 })); }
     catch { /* caller already gone */ }
   }
-  if (result.answered) pushInbox(`you answered ${a.label.toLowerCase()}: ${result.label}`, 'ask');
+  if (result.answered) pushInbox(`you answered ${a.label.toLowerCase()}: ${result.label || result.text}`, 'ask');
   if (a.showing && pendingQuestion && pendingQuestion.askId === a.askId) {
     a.showing = false;
     clearQuestion(); // shows the next queued ask
@@ -435,6 +435,7 @@ function maybeShowNextAsk() {
     sessionKey: null,
     agent: a.label,
     external: true,
+    allowText: !!a.allowText,
     header: a.header,
     question: a.question,
     options: a.options,
@@ -706,6 +707,9 @@ function startAgentServer() {
           return done(200, { ok: true });
         }
         if (TEST && p === '/test/sessions-clear') {
+          // defuse held external asks too, or a failed scenario's ask leaks
+          // into every later one (same doctrine as bond-roll defusing)
+          for (const a of [...askQueue]) askResolve(a, { answered: false, reason: 'cleared' });
           sessions.clear();
           clearQuestion();
           emitAgents();
@@ -785,13 +789,14 @@ function startAgentServer() {
             if (!lbl) return null;
             return { id: cleanText(src.id, 24) || String(i + 1), label: lbl, desc: cleanText(src.description, 90) };
           }).filter(Boolean).slice(0, 4);
-          if (!question || !options.length) {
-            return done(400, { ok: false, error: 'need a question and at least one option' });
+          const allowText = !!data.allowText;
+          if (!question || (!options.length && !allowText)) {
+            return done(400, { ok: false, error: 'need a question and at least one option (or allowText)' });
           }
           if (askQueue.length >= 5) return done(429, { ok: false, error: 'ask queue is full' });
           const a = {
             askId: 'a' + Date.now() + '-' + (++askSeq),
-            label, question, options,
+            label, question, options, allowText,
             header: cleanText(data.header, 16),
             t0: Date.now(), res, resolved: false, showing: false, hb: null, timer: null,
           };
@@ -1579,6 +1584,14 @@ function setupAskIpc() {
     if (!q || q.qid !== qid) return;
     const r = await focusQuestionWindow(q, false, 0);
     send('ask-result', { qid, ...r });
+  });
+  ipcMain.on('ask:text', (e, { qid, text }) => {
+    const q = pendingQuestion;
+    if (!q || q.qid !== qid || !q.external || !q.allowText) return;
+    const t = cleanText(text, 400);
+    if (!t) return;
+    const a = askQueue.find((x) => x.askId === q.askId);
+    if (a) askResolve(a, { answered: true, id: 'text', text: t });
   });
   ipcMain.on('ask:dismiss', (e, { qid }) => {
     const q = pendingQuestion;

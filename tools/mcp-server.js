@@ -47,9 +47,10 @@ const TOOLS = [
           },
         },
         agent: { type: 'string', description: 'Short name shown to the user as the asker (default: mcp)' },
+        allowText: { type: 'boolean', description: 'Also show a free-text reply field. With allowText, options may be omitted for open questions.' },
         timeoutS: { type: 'number', description: 'Optional deadline in seconds. Default: wait indefinitely.' },
       },
-      required: ['question', 'options'],
+      required: ['question'],
     },
   },
   {
@@ -83,11 +84,13 @@ async function callTool(name, args) {
       return JSON.stringify(s, null, 2);
     }
     case 'ask_user': {
-      const body = { agent: String(args.agent || 'mcp'), question: String(args.question || ''), options: args.options };
+      const body = { agent: String(args.agent || 'mcp'), question: String(args.question || ''), options: args.options || [] };
+      if (args.allowText) body.allowText = true;
       if (Number(args.timeoutS) > 0) body.timeoutMs = Math.round(Number(args.timeoutS) * 1000);
       const r = await post('/ask', body);
       if (!r.ok) return 'The cat could not ask: ' + (r.error || 'unknown error');
       if (!r.answered) return `No answer from the user (${r.reason} after ${Math.round((r.elapsedMs || 0) / 1000)}s). Re-ask later or proceed conservatively.`;
+      if (r.id === 'text') return `The user typed: "${r.text}" (after ${Math.round((r.elapsedMs || 0) / 1000)}s).`;
       return `The user chose: "${r.label}" (id: ${r.id}, answered after ${Math.round((r.elapsedMs || 0) / 1000)}s).`;
     }
     case 'cat_voice': {

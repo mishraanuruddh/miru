@@ -65,7 +65,7 @@ async function main() {
       // blocks until the user answers on the cat; prints the chosen label
       const opts = [];
       const words = [];
-      let agent = 'script', timeoutMs = 0;
+      let agent = 'script', timeoutMs = 0, allowText = false;
       for (let i = 0; i < rest.length; i++) {
         if (rest[i] === '-o') {
           const v = String(rest[++i] || '');
@@ -75,18 +75,20 @@ async function main() {
           if (label) opts.push({ label, description });
         } else if (rest[i] === '--agent') agent = rest[++i] || agent;
         else if (rest[i] === '--timeout') timeoutMs = (Number(rest[++i]) || 0) * 1000;
+        else if (rest[i] === '--text') allowText = true;
         else words.push(rest[i]);
       }
       const question = words.join(' ');
-      if (!question || !opts.length) {
-        die('usage: miru ask "question" -o "label[: description]" [-o ...] [--timeout seconds] [--agent name]');
+      if (!question || (!opts.length && !allowText)) {
+        die('usage: miru ask "question" -o "label[: description]" [-o ...] [--text] [--timeout seconds] [--agent name]');
       }
       const body = { agent, question, options: opts };
+      if (allowText) body.allowText = true;
       if (timeoutMs > 0) body.timeoutMs = timeoutMs;
       const r = await post('/ask', body);
       if (!r.ok) die('the cat could not ask: ' + (r.error || 'unknown error'));
       if (!r.answered) die('no answer: ' + r.reason);
-      console.log(r.label);
+      console.log(r.id === 'text' ? r.text : r.label);
       break;
     }
     case 'talk': {
@@ -116,6 +118,7 @@ usage:
   miru todo "task"              add to the cat's task list
   miru tasks                    list tasks
   miru ask "q" -o "a" -o "b"    ask via the cat, wait, print the answer
+       [--text]                 also offer a free-text reply field
   miru agent <state> [--agent n]  thinking|done|alert|idle
   miru talk ["utterance"]       route through the cat's brain (no text = listen)
   miru menu|show|hide           control the cat

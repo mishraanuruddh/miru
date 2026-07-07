@@ -6,7 +6,7 @@ anatomy is ASCII art in `renderer/sprites.js`.
 
 ## Before claiming anything is done
 
-- `npm test` must pass (84 scenarios; the count grows — keep it green, run it
+- `npm test` must pass (85 scenarios; the count grows — keep it green, run it
   twice if you touched timing). It boots a real Electron instance in an
   isolated per-PID profile, so it's safe while the user's cat is running.
 - `node --check` every file you edit. No linter is configured; match the

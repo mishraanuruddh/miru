@@ -72,7 +72,12 @@ async function runScenarios(ctx) {
 
   const scenario = async (name, fn) => {
     try {
-      await fn();
+      // watchdog: a hung await (e.g. a held /ask that never resolves) must
+      // fail THIS scenario, never hang the whole suite
+      await Promise.race([
+        fn(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('watchdog: scenario hung >45s')), 45000)),
+      ]);
       results.push({ name, pass: true });
       console.log('PASS  ' + name);
     } catch (e) {
@@ -1509,8 +1514,8 @@ async function runScenarios(ctx) {
     }, '3 chips drawn');
     assert(d.question.options[0].desc === 'zero downtime, needs 2x disk',
       'description lost: ' + JSON.stringify(d.question.options[0]));
-    assert(d.question.boxes[0].h > 20, 'desc chip should be taller: ' + JSON.stringify(d.question.boxes[0]));
-    assert(d.question.boxes[2].h === 16, 'no-desc chip stays single-line: ' + JSON.stringify(d.question.boxes[2]));
+    assert(d.question.boxes[0].h > d.question.boxes[2].h + 8,
+      'described option should be a taller row: ' + JSON.stringify([d.question.boxes[0], d.question.boxes[2]]));
     const p = d.question.panelBox;
     for (const b of d.question.boxes) {
       assert(b.x + b.w <= p.x + p.w && b.y + b.h <= p.y + p.h, 'chip outside panel: ' + JSON.stringify(b));
@@ -1530,26 +1535,8 @@ async function runScenarios(ctx) {
       return x.question && x.question.boxes.length === 2 ? x : null;
     }, 'panel with 2 chips');
     // glyph-overflow regression: nothing may paint right of the panel border
-    const leak = await catWin.webContents.executeJavaScript(`
-      (() => {
-        const q = window.__catDebug().question;
-        if (!q || !q.panelBox) return -1;
-        const cv = document.getElementById('cat');
-        const dpr = window.devicePixelRatio || 1;
-        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
-        const y0 = Math.ceil(q.panelBox.y * dpr);
-        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
-        let n = 0;
-        for (let y = y0; y <= y1; y++) {
-          for (let x = x0; x < cv.width; x++) {
-            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
-          }
-        }
-        return n;
-      })()
-    `);
-    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    const s = d.question.qScroll;
+    assert(s && s.sw <= s.cw + 1, 'question overflows its panel horizontally: ' + JSON.stringify(s));
     await cap('wild-ask-url-wrap');
     await askCleared();
   });
@@ -1697,31 +1684,13 @@ async function runScenarios(ctx) {
       'authored breaks lost: ' + JSON.stringify(d.question.text));
     assert(d.question.qHidden === 0, 'short question should fit whole, hid ' + d.question.qHidden);
     // the taller structured panel must still stay inside its border
-    const leak = await catWin.webContents.executeJavaScript(`
-      (() => {
-        const q = window.__catDebug().question;
-        if (!q || !q.panelBox) return -1;
-        const cv = document.getElementById('cat');
-        const dpr = window.devicePixelRatio || 1;
-        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
-        const y0 = Math.ceil(q.panelBox.y * dpr);
-        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
-        let n = 0;
-        for (let y = y0; y <= y1; y++) {
-          for (let x = x0; x < cv.width; x++) {
-            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
-          }
-        }
-        return n;
-      })()
-    `);
-    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    const s = d.question.qScroll;
+    assert(s && s.sw <= s.cw + 1, 'question overflows its panel horizontally: ' + JSON.stringify(s));
     await cap('wild-ask-structured');
     await askCleared();
   });
 
-  await scenario('wild output: a long question shrinks to caption size and fits whole', async () => {
+  await scenario('wild output: a long question stays whole and bounded', async () => {
     const lines = [];
     for (let i = 1; i <= 9; i++) lines.push(i + '. memory mapped worker window management area');
     await post('/hook/claude/ask', { session_id: 'wild7', tool_input: { questions: [{
@@ -1732,14 +1701,16 @@ async function runScenarios(ctx) {
       const x = await debug();
       return x.question && x.question.boxes.length === 2 ? x : null;
     }, 'panel with 2 chips');
-    assert(d.question.qHidden === 0, 'nothing may hide at this length, hid ' + d.question.qHidden);
-    assert(d.question.qFontPx < 2, 'expected the caption-size fallback, got px ' + d.question.qFontPx);
-    await cap('wild-ask-shrink-fit');
+    assert(d.question.text.split('\n').length === 11, 'authored lines lost');
+    assert(d.question.qHidden === 0, 'the DOM panel must never hide text');
+    const p = d.question.panelBox;
+    assert(p.y >= 0 && p.y + p.h <= 430, 'panel escapes the window: ' + JSON.stringify(p));
+    await cap('wild-ask-long');
     await askCleared();
   });
 
-  await scenario('wild output: worst case still keeps the final ask visible', async () => {
-    // a giant cat steals panel height: the head+tail cut must kick in
+  await scenario('wild output: a huge question at giant scale stays bounded and scrolls', async () => {
+    // a giant cat shrinks the panel's room: it must bound itself and scroll
     store.set({ scale: 10 });
     broadcastSettings();
     await wait(300);
@@ -1753,27 +1724,10 @@ async function runScenarios(ctx) {
       const x = await debug();
       return x.question && x.question.boxes.length === 2 ? x : null;
     }, 'panel with 2 chips');
-    assert(d.question.qHidden > 0, 'expected a hidden middle at giant scale');
-    const leak = await catWin.webContents.executeJavaScript(`
-      (() => {
-        const q = window.__catDebug().question;
-        if (!q || !q.panelBox) return -1;
-        const cv = document.getElementById('cat');
-        const dpr = window.devicePixelRatio || 1;
-        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
-        const y0 = Math.ceil(q.panelBox.y * dpr);
-        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
-        let n = 0;
-        for (let y = y0; y <= y1; y++) {
-          for (let x = x0; x < cv.width; x++) {
-            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
-          }
-        }
-        return n;
-      })()
-    `);
-    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    const p = d.question.panelBox;
+    const s = d.question.qScroll;
+    assert(p.y >= 0 && p.y + p.h <= 430, 'panel escapes the window: ' + JSON.stringify(p));
+    assert(s && s.sh > s.ch, 'a question this size must scroll: ' + JSON.stringify(s));
     await cap('wild-ask-worst-case');
     await askCleared();
     store.set({ scale: 4 });
@@ -1785,6 +1739,7 @@ async function runScenarios(ctx) {
   // POST /ask holds its response open; the user's chip click IS the reply
 
   await scenario('external ask: a chip click answers the caller over the wire', async () => {
+    await post('/test/sessions-clear', {}); // defuse anything a failed wild scenario left up
     const held = httpPost(port(), '/ask', {
       agent: 'chief-of-staff',
       question: 'Cancel the 3pm sync?\nIt collides with the design review.',
@@ -1846,7 +1801,10 @@ async function runScenarios(ctx) {
       const x = await debug();
       return x.question && !x.question.external ? x : null;
     }, 'claude question took over');
-    await post('/test/sessions-clear', {});
+    // clear claude's question the way claude does — sessions-clear would
+    // flush the held external ask this scenario is about
+    await post('/hook/claude/ask-done', { session_id: 'pre1' });
+    await post('/hook/claude/end', { session_id: 'pre1' });
     const d = await waitFor(async () => {
       const x = await debug();
       return x.question && x.question.external && x.question.boxes.length === 2 ? x : null;
@@ -1856,6 +1814,29 @@ async function runScenarios(ctx) {
     assert(r.ok && r.answered === true && r.label === 'Approve',
       'requeued ask lost its answer: ' + JSON.stringify(r));
     await waitFor(async () => !(await debug()).question, 'panel cleared');
+  });
+
+  await scenario('external ask: a typed reply travels back', async () => {
+    const held = httpPost(port(), '/ask', {
+      agent: 'cos',
+      question: 'What should I tell the landlord about Saturday?',
+      options: [{ label: 'Skip it' }],
+      allowText: true,
+    });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.external && x.question.inputBox && x.question.sendBox ? x : null;
+    }, 'reply field drawn');
+    await cap('external-ask-text');
+    await catWin.webContents.executeJavaScript(
+      `document.getElementById('askInput').value = 'Tell them Thursday works better'`);
+    clickBox(d.question.sendBox);
+    const r = JSON.parse((await held).body);
+    assert(r.ok && r.answered === true && r.id === 'text' &&
+      r.text === 'Tell them Thursday works better', 'typed reply wrong: ' + JSON.stringify(r));
+    await waitFor(async () => !(await debug()).question, 'panel cleared');
+    assert((store.get().inboxLog || []).some((e) => e.text.includes('Thursday works better')),
+      'typed answer missing from the inbox trail');
   });
 
   // ------------------------------------------------------------------ report

@@ -177,7 +177,7 @@
   });
 
   miru.onAsk((q) => {
-    st.question = { ...q, status: 'idle', hover: -1, boxes: [], openBox: null, dismissBox: null, panelBox: null };
+    st.question = { ...q, status: 'idle' };
     st.bubble = null;
     st.alertUntil = -1e9;
     st.hopUntil = now() + 700;
@@ -357,7 +357,10 @@
     if (inBox(x, y, st.chipBBox)) return true;
     if (inBox(x, y, st.ledBox)) return true;
     if (st.bubble && inBox(x, y, st.bubbleBox)) return true;
-    if (st.question && inBox(x, y, st.question.panelBox)) return true;
+    if (askEl) {
+      const r = askEl.getBoundingClientRect();
+      if (x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 10) return true;
+    }
     if (st.confirm && inBox(x, y, st.confirm.panelBox)) return true;
     if (st.voice.phase === 'listening' && inBox(x, y, st.voice.cancelBox)) return true;
     if (st.menu.open && panelEl) {
@@ -378,10 +381,7 @@
   window.addEventListener('mousemove', (e) => {
     updateInteractive(e.clientX, e.clientY);
 
-    // question / confirm panel hover
-    if (st.question) {
-      st.question.hover = st.question.boxes.findIndex((b) => inBox(e.clientX, e.clientY, b));
-    }
+    // confirm panel hover (the ask panel is DOM and hovers natively)
     if (st.confirm) {
       st.confirm.hover = st.confirm.boxes.findIndex((b) => inBox(e.clientX, e.clientY, b));
     }
@@ -447,24 +447,9 @@
       return;
     }
 
-    // question panel clicks take priority
-    const q = st.question;
-    if (q && inBox(X, Y, q.panelBox)) {
-      const opt = q.boxes.findIndex((b) => inBox(X, Y, b));
-      if (opt >= 0 && (q.canType || q.external) && !q.status.startsWith('typed')) {
-        q.status = 'sending';
-        miru.askAnswer(q.qid, opt);
-        CatAudio.pop();
-      } else if (inBox(X, Y, q.openBox)) {
-        miru.askOpen(q.qid);
-        CatAudio.pop();
-      } else if (inBox(X, Y, q.dismissBox)) {
-        miru.askDismiss(q.qid);
-        st.question = null;
-        CatAudio.pop();
-      }
-      return;
-    }
+    // ask panel is DOM: its rows/buttons handle their own clicks; swallow
+    // anything else inside the panel so it never falls through to the cat
+    if (askEl && e.target && e.target.closest && e.target.closest('.panel.ask')) return;
 
     if (inBox(X, Y, st.ledBox)) {
       miru.ledClick();
@@ -715,6 +700,7 @@
       }
     }
     syncMenuDom();
+    syncAskDom();
 
     // gaze wander when the mouse has been still for a while
     const w = st.wander;
@@ -1199,9 +1185,8 @@
       const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
       topY = drawConfirmPanel(sitTop - 6) - 8;
     } else if (st.question) {
-      // stable anchor: the panel must not bounce while the cat hops/celebrates
-      const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
-      topY = drawQuestionPanel(sitTop - 6) - 8;
+      // the ask panel is DOM (syncAskDom); stack the pinned note above it
+      if (askEl) topY = askEl.getBoundingClientRect().top - 8;
     } else if (st.bubble) {
       topY = drawSpeech(st.bubble.text, topY, '#fffef8', '#14131a') - 8;
     }
@@ -1212,137 +1197,165 @@
     }
   }
 
-  // interactive question panel: actual options from AskUserQuestion
-  function drawQuestionPanel(bottomY) {
+  // ------------- ask panel: DOM, same visual language as the menu (legible
+  // system-ui for dense agent questions; the pixel font stays on the cat +
+  // her short speech bubbles). Geometry for tests comes from live DOM rects.
+  let askEl = null;
+  let askStatusEl = null;
+
+  function askRect(el) {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  }
+
+  function askStatusText() {
     const q = st.question;
-    const w = Math.min(W - 20, 360);
-    const x = W / 2 - w / 2;
-    const chipH = 16;
-    const availH = bottomY - 12; // everything above the cat is fair game
+    if (!q) return '';
+    if (q.status.startsWith('typed:')) return 'typed into ' + q.status.slice(6).toLowerCase();
+    if (q.status.startsWith('focused:')) return 'opened ' + q.status.slice(8).toLowerCase();
+    if (q.status === 'notfound') return 'window not found';
+    if (q.status === 'sending') return 'sending…';
+    return '';
+  }
 
-    // chips flow left-to-right like the confirm panel, sized to their labels;
-    // a description renders as a smaller gray second line inside the chip
-    const rows = [];
-    {
-      let row = [], rowW = 0;
-      q.options.forEach((opt, i) => {
-        const numW = PixelFont.measure(String(i + 1), 1.5);
-        const inset = 7 + numW + 5;
-        const need = (t) => inset + PixelFont.measure(t.toUpperCase(), 1.5) + 7;
-        const cw = Math.min(w - 16, Math.max(40, need(opt.label), opt.desc ? need(opt.desc) : 0));
-        const descLines = opt.desc ? wrapText(opt.desc.toUpperCase(), cw - inset - 7, 1.5, 2) : [];
-        const chH = chipH + (descLines.length ? descLines.length * 10 + 2 : 0);
-        if (rowW + cw + 4 > w - 16 && row.length) { rows.push(row); row = []; rowW = 0; }
-        row.push({ opt, i, w: cw, numW, inset, descLines, h: chH });
-        rowW += cw + 4;
-      });
-      if (row.length) rows.push(row);
-    }
-    const chipsH = rows.reduce((s, r) => s + Math.max(...r.map((c) => c.h)) + 3, 0);
-    const fixedH = 16 + 4 + chipsH + 16 + 8; // title + gap + chips + footer + pad
-
-    // the question gets the rest: full size first, caption size under
-    // pressure, and only then a head+tail cut that keeps the actual ask
-    let qpx = 2, lh = 14, qAll = [], maxL = 1;
-    for (const tryPx of [2, 1.5]) {
-      qpx = tryPx;
-      lh = Math.round(7 * tryPx);
-      qAll = wrapText(q.question.toUpperCase(), w - 20, tryPx, 99);
-      maxL = Math.max(1, Math.floor((availH - fixedH) / lh));
-      if (qAll.length <= maxL) break;
-    }
-    let qLines = qAll, hidden = 0;
-    if (qAll.length > maxL) {
-      maxL = Math.max(1, Math.floor((availH - fixedH - 10) / lh)); // hint line
-      if (maxL >= 3) {
-        qLines = qAll.slice(0, maxL - 2).concat(['...'], qAll.slice(-1));
-        hidden = qAll.length - (maxL - 1);
-      } else {
-        qLines = qAll.slice(0, maxL);
-        hidden = qAll.length - maxL;
-      }
-    }
-    q.qHidden = hidden;
-    q.qFontPx = qpx;
-    const h = 16 + qLines.length * lh + (hidden ? 10 : 0) + 4 + chipsH + 16 + 8;
-    const y = bottomY - h - 8;
-
-    // frame
-    ctx.fillStyle = '#14131a';
-    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
-    ctx.fillStyle = '#fffef8';
-    ctx.fillRect(x, y, w, h);
-    // tail to the cat
-    ctx.fillStyle = '#14131a';
-    ctx.fillRect(W / 2 - 4, y + h + 2, 8, 4);
-    ctx.fillStyle = '#fffef8';
-    ctx.fillRect(W / 2 - 2, y + h, 4, 4);
-
-    // title strip
-    ctx.fillStyle = '#ffd400';
-    ctx.fillRect(x, y, w, 12);
-    const title = `${q.agent} ASKS${q.header ? ' · ' + q.header.toUpperCase() : ''}`;
-    PixelFont.draw(ctx, fitText(title, 2, w - 12), x + 6, y + 3, 2, '#14131a');
-
-    let cy = y + 16;
-    for (const line of qLines) {
-      PixelFont.draw(ctx, line, x + 8, cy, qpx, '#14131a');
-      cy += lh;
-    }
-    if (hidden > 0) {
-      PixelFont.draw(ctx, `+${hidden} MORE LINE${hidden > 1 ? 'S' : ''} IN THE TERMINAL`,
-        x + 8, cy + 1, 1.5, '#8a8794');
-      cy += 10;
-    }
-    cy += 4;
-
+  function buildAskDom() {
+    const q = st.question;
     const clickable = q.canType || q.external;
-    q.boxes = [];
-    for (const r of rows) {
-      let bx = x + 8;
-      const rowH = Math.max(...r.map((c) => c.h));
-      for (const ch of r) {
-        const hovered = q.hover === ch.i && clickable;
-        ctx.fillStyle = '#14131a';
-        ctx.fillRect(bx - 1, cy - 1, ch.w + 2, ch.h + 2);
-        ctx.fillStyle = hovered ? '#ffd400' : clickable ? '#2a2933' : '#3a3942';
-        ctx.fillRect(bx, cy, ch.w, ch.h);
-        PixelFont.draw(ctx, String(ch.i + 1), bx + 7, cy + 5, 1.5, hovered ? '#14131a' : '#ffd400');
-        PixelFont.draw(ctx, fitText(ch.opt.label.toUpperCase(), 1.5, ch.w - ch.inset - 7),
-          bx + ch.inset, cy + 5, 1.5, hovered ? '#14131a' : '#fdf8ec');
-        ch.descLines.forEach((dl, di) => {
-          PixelFont.draw(ctx, dl, bx + ch.inset, cy + 15 + di * 10, 1.5,
-            hovered ? '#4a4433' : '#8a8794');
-        });
-        q.boxes.push({ x: bx, y: cy, w: ch.w, h: ch.h });
-        bx += ch.w + 4;
+    askEl = document.createElement('div');
+    askEl.className = 'panel ask';
+    askEl.dataset.qid = q.qid;
+    const sitTop = H - 12 - FRAMES.sit.h * (settings.scale || 4);
+    askEl.style.bottom = (H - sitTop + 14) + 'px';
+    askEl.style.maxHeight = Math.max(140, sitTop - 18) + 'px';
+
+    const title = document.createElement('div');
+    title.className = 'panel-title';
+    const hint = q.multiSelect ? 'multi-select · answer in terminal'
+      : clickable ? 'click to answer' : 'answer in terminal';
+    title.innerHTML = `<span>${escHtml(q.agent)} asks${q.header ? ' · ' + escHtml(q.header) : ''}</span><span class="esc">${hint}</span>`;
+    askEl.appendChild(title);
+
+    const body = document.createElement('div');
+    body.className = 'ask-q';
+    body.textContent = q.question;
+    askEl.appendChild(body);
+
+    q.options.forEach((opt, i) => {
+      const r = document.createElement('div');
+      r.className = 'row opt' + (clickable ? '' : ' disabled');
+      const num = document.createElement('span');
+      num.className = 'num';
+      num.textContent = String(i + 1);
+      const tx = document.createElement('div');
+      tx.className = 'tx';
+      const lb = document.createElement('div');
+      lb.className = 'lb';
+      lb.textContent = opt.label;
+      tx.appendChild(lb);
+      if (opt.desc) {
+        const hn = document.createElement('div');
+        hn.className = 'hint';
+        hn.textContent = opt.desc;
+        tx.appendChild(hn);
       }
-      cy += rowH + 3;
+      r.appendChild(num);
+      r.appendChild(tx);
+      if (clickable) {
+        r.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          const cur = st.question;
+          if (!cur || cur.qid !== q.qid || cur.status.startsWith('typed')) return;
+          if (!cur.external) cur.status = 'sending';
+          miru.askAnswer(q.qid, i);
+          CatAudio.pop();
+        });
+      }
+      askEl.appendChild(r);
+    });
+
+    if (q.allowText) {
+      // the optional free-text reply: chips first, typing is the quiet lane
+      const bar = document.createElement('div');
+      bar.className = 'addbar';
+      const input = document.createElement('input');
+      input.id = 'askInput';
+      input.placeholder = q.options.length ? 'Or type a reply…' : 'Type a reply…';
+      input.maxLength = 400;
+      input.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        miru.setFocusable(true);
+        setTimeout(() => input.focus(), 60);
+      });
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') submit();
+        if (e.key === 'Escape') { input.blur(); miru.setFocusable(false); }
+      });
+      const btn = document.createElement('button');
+      btn.className = 'ask-send';
+      btn.textContent = 'Send';
+      const submit = () => {
+        const v = input.value.trim();
+        if (!v) return;
+        miru.askText(q.qid, v);
+        CatAudio.pop();
+      };
+      btn.addEventListener('mousedown', (e) => { e.stopPropagation(); submit(); });
+      bar.appendChild(input);
+      bar.appendChild(btn);
+      askEl.appendChild(bar);
     }
 
-    // footer: status (or how-to-answer note) left, buttons right
-    const fy = cy + 2;
-    const mkBtn = (label, bx) => {
-      const bw = PixelFont.measure(label, 1.5) + 10;
-      ctx.fillStyle = '#14131a';
-      ctx.fillRect(bx - bw, fy, bw, 12);
-      PixelFont.draw(ctx, label, bx - bw + 5, fy + 3, 1.5, '#fdf8ec');
-      return { x: bx - bw, y: fy, w: bw, h: 12 };
-    };
-    q.dismissBox = mkBtn('DISMISS', x + w - 6);
-    q.openBox = q.tty ? mkBtn('OPEN', q.dismissBox.x - 5) : null;
-    let leftText = null;
-    if (q.status.startsWith('typed:')) leftText = 'TYPED INTO ' + q.status.slice(6).toUpperCase();
-    else if (q.status.startsWith('focused:')) leftText = 'OPENED ' + q.status.slice(8).toUpperCase();
-    else if (q.status === 'notfound') leftText = 'WINDOW NOT FOUND';
-    else if (!clickable) leftText = q.multiSelect ? 'MULTI-SELECT: ANSWER IN TERMINAL' : 'ANSWER IN TERMINAL';
-    if (leftText) {
-      const leftMax = (q.openBox ? q.openBox.x : q.dismissBox.x) - (x + 8) - 8;
-      PixelFont.draw(ctx, fitText(leftText, 1.5, leftMax), x + 8, fy + 3, 1.5, '#8a8794');
+    const foot = document.createElement('div');
+    foot.className = 'ask-foot';
+    askStatusEl = document.createElement('span');
+    askStatusEl.className = 'ask-status';
+    foot.appendChild(askStatusEl);
+    const btns = document.createElement('div');
+    btns.className = 'ask-btns';
+    if (q.tty) {
+      const open = document.createElement('button');
+      open.className = 'ask-btn ask-open';
+      open.textContent = 'Open';
+      open.addEventListener('mousedown', (e) => { e.stopPropagation(); miru.askOpen(q.qid); CatAudio.pop(); });
+      btns.appendChild(open);
     }
+    const dis = document.createElement('button');
+    dis.className = 'ask-btn ask-dismiss';
+    dis.textContent = 'Dismiss';
+    dis.addEventListener('mousedown', (e) => { e.stopPropagation(); miru.askDismiss(q.qid); CatAudio.pop(); });
+    btns.appendChild(dis);
+    foot.appendChild(btns);
+    askEl.appendChild(foot);
 
-    q.panelBox = { x: x - 2, y: y - 2, w: w + 4, h: h + 6 };
-    return y;
+    ui.appendChild(askEl);
+    if (st.testMode) {
+      // TEST-inert motion: rects must be final the moment the panel exists,
+      // or geometry waits capture mid-spring coordinates and clicks miss
+      askEl.classList.add('open', 'notrans');
+    } else {
+      requestAnimationFrame(() => askEl && askEl.classList.add('open'));
+    }
+  }
+
+  function syncAskDom() {
+    const q = st.question;
+    if (q && (!askEl || askEl.dataset.qid !== q.qid)) {
+      if (askEl) askEl.remove();
+      askEl = null;
+      buildAskDom();
+    } else if (!q && askEl) {
+      askEl.remove();
+      askEl = null;
+      askStatusEl = null;
+      miru.setFocusable(false);
+    }
+    if (q && askStatusEl) askStatusEl.textContent = askStatusText();
   }
 
   function truncate(s, n) {
@@ -1891,20 +1904,32 @@
     tasksOpen: (settings.tasks || []).filter((t) => !t.done).length,
     tasksDone: (settings.tasks || []).filter((t) => t.done).length,
     inboxCount: st.inbox.length,
-    question: st.question ? {
-      qid: st.question.qid,
-      text: st.question.question,
-      external: !!st.question.external,
-      qHidden: st.question.qHidden || 0,
-      qFontPx: st.question.qFontPx || 2,
-      options: st.question.options,
-      canType: st.question.canType,
-      status: st.question.status,
-      boxes: st.question.boxes,
-      openBox: st.question.openBox,
-      dismissBox: st.question.dismissBox,
-      panelBox: st.question.panelBox,
-    } : null,
+    question: st.question ? (() => {
+      const q = st.question;
+      // never mix fresh state with a previous ask's DOM (one-frame rebuild gap)
+      const live = askEl && askEl.dataset.qid === q.qid ? askEl : null;
+      const qBody = live && live.querySelector('.ask-q');
+      return {
+        qid: q.qid,
+        text: q.question,
+        external: !!q.external,
+        allowText: !!q.allowText,
+        qHidden: 0, // the DOM panel never hides question text; it scrolls
+        options: q.options,
+        canType: q.canType,
+        status: q.status,
+        boxes: live ? [...live.querySelectorAll('.row.opt')].map(askRect) : [],
+        openBox: askRect(live && live.querySelector('.ask-open')),
+        dismissBox: askRect(live && live.querySelector('.ask-dismiss')),
+        inputBox: askRect(live && live.querySelector('#askInput')),
+        sendBox: askRect(live && live.querySelector('.ask-send')),
+        panelBox: askRect(live),
+        qScroll: qBody ? {
+          sh: qBody.scrollHeight, ch: qBody.clientHeight,
+          sw: qBody.scrollWidth, cw: qBody.clientWidth,
+        } : null,
+      };
+    })() : null,
     skin: settings.skin,
   });
 
