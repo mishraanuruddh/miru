@@ -395,6 +395,59 @@ function clearQuestion(qid) {
   pendingQuestion = null;
   send('ask-clear', {});
   emitAgents();
+  maybeShowNextAsk();
+}
+
+// ------------------------------------------------------------ external asks
+// POST /ask holds its HTTP response open until the user answers on the cat
+// (or dismisses / times out / the caller disconnects). One panel at a time;
+// a live claude question preempts and the ask waits its turn, never dropped.
+let askQueue = [];
+let askSeq = 0;
+
+function askResolve(a, result, skipEnd) {
+  if (a.resolved) return;
+  a.resolved = true;
+  clearInterval(a.hb);
+  clearTimeout(a.timer);
+  askQueue = askQueue.filter((x) => x !== a);
+  if (!skipEnd) {
+    try { a.res.end(JSON.stringify({ ok: true, ...result, elapsedMs: Date.now() - a.t0 })); }
+    catch { /* caller already gone */ }
+  }
+  if (result.answered) pushInbox(`you answered ${a.label.toLowerCase()}: ${result.label}`, 'ask');
+  if (a.showing && pendingQuestion && pendingQuestion.askId === a.askId) {
+    a.showing = false;
+    clearQuestion(); // shows the next queued ask
+  } else {
+    maybeShowNextAsk();
+  }
+}
+
+function maybeShowNextAsk() {
+  if (pendingQuestion) return;
+  const a = askQueue.find((x) => !x.resolved);
+  if (!a) return;
+  a.showing = true;
+  pendingQuestion = {
+    qid: 'ask:' + a.askId,
+    askId: a.askId,
+    sessionKey: null,
+    agent: a.label,
+    external: true,
+    header: a.header,
+    question: a.question,
+    options: a.options,
+    multiSelect: false,
+    extraQuestions: 0,
+    canType: false,
+    tty: null,
+  };
+  send('ask', { ...pendingQuestion });
+}
+
+function askShutdown() {
+  for (const a of [...askQueue]) askResolve(a, { answered: false, reason: 'shutdown' });
 }
 
 // celebration rate limiter: bursty agents (batch pipelines!) collapse to a
@@ -494,7 +547,15 @@ function handleClaudeHook(route, data, tty) {
       const questions = (data.tool_input && data.tool_input.questions) || [];
       if (!questions.length) break;
       const q = questions[0];
-      const options = (q.options || []).map((o) => cleanText(o && o.label, 60)).filter(Boolean).slice(0, 4);
+      // first label line is the chip label; the real description field (or
+      // the label's remaining lines) becomes a smaller second line on the chip
+      const options = (q.options || []).map((o) => {
+        const raw = String((o && o.label) != null ? o.label : '');
+        const nl = raw.search(/[\r\n]/);
+        const label = cleanText(nl >= 0 ? raw.slice(0, nl) : raw, 60);
+        const desc = cleanText((o && o.description) || (nl >= 0 ? raw.slice(nl) : ''), 90);
+        return label ? { label, desc } : null;
+      }).filter(Boolean).slice(0, 4);
       const sTty = tty || (sessions.get(sid) || {}).tty || null;
       sessionUpsert(sid, { lastMsg: cleanText(q.question, 70) });
       pendingQuestion = {
@@ -502,7 +563,7 @@ function handleClaudeHook(route, data, tty) {
         sessionKey: sid,
         agent: 'CLAUDE',
         header: cleanText(q.header, 16),
-        question: cleanBlock(q.question, 300, 8),
+        question: cleanBlock(q.question, 500, 12),
         options,
         multiSelect: !!q.multiSelect,
         extraQuestions: questions.length - 1,
@@ -512,6 +573,11 @@ function handleClaudeHook(route, data, tty) {
       sessionUpsert(sid, { state: 'alert', hasQuestion: true, tty: sTty });
       // a live agent question outranks ambient nudges
       if (activeConfirm && AMBIENT_CONFIRM[activeConfirm.kind]) clearConfirm('preempted');
+      // an external ask on screen steps aside (stays queued, response held)
+      if (pendingQuestion && pendingQuestion.external) {
+        const cur = askQueue.find((x) => x.askId === pendingQuestion.askId);
+        if (cur) cur.showing = false;
+      }
       pushInbox('claude asks: ' + cleanText(q.question, 80), 'ask');
       send('ask', { ...pendingQuestion });
       break;
@@ -563,6 +629,9 @@ function startAgentServer() {
           confirm: activeConfirm
             ? { cid: activeConfirm.cid, kind: activeConfirm.kind, taskIds: activeConfirm.taskIds }
             : null,
+          asks: askQueue.filter((a) => !a.resolved).map((a) => ({
+            agent: a.label, showing: a.showing, ageSec: Math.round((Date.now() - a.t0) / 1000),
+          })),
           inboxCount: inbox.length,
           pomodoro: pom.phase === 'off' ? null : { phase: pom.phase, remaining: pom.remaining, paused: pom.paused },
           voice: { phase: voice.phase, availability: brain.availability(), usage: voiceUsageRoll() },
@@ -705,6 +774,37 @@ function startAgentServer() {
             onDismiss: (reason) => askCalls.push({ confirmDismiss: reason }),
           });
           return done(200, { ok: !!cid, cid });
+        }
+        if (p === '/ask') {
+          // two-way: hold this response open until the user answers on the cat
+          const label = agentLabel(data.agent);
+          const question = cleanBlock(data.question, 500, 12);
+          const options = (Array.isArray(data.options) ? data.options : []).map((o, i) => {
+            const src = typeof o === 'string' ? { label: o } : (o || {});
+            const lbl = cleanText(src.label, 60);
+            if (!lbl) return null;
+            return { id: cleanText(src.id, 24) || String(i + 1), label: lbl, desc: cleanText(src.description, 90) };
+          }).filter(Boolean).slice(0, 4);
+          if (!question || !options.length) {
+            return done(400, { ok: false, error: 'need a question and at least one option' });
+          }
+          if (askQueue.length >= 5) return done(429, { ok: false, error: 'ask queue is full' });
+          const a = {
+            askId: 'a' + Date.now() + '-' + (++askSeq),
+            label, question, options,
+            header: cleanText(data.header, 16),
+            t0: Date.now(), res, resolved: false, showing: false, hb: null, timer: null,
+          };
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          // whitespace heartbeat: keeps sockets + fetch clients alive for hours
+          a.hb = setInterval(() => { try { res.write(' '); } catch { /* closing */ } }, 20000);
+          const tmo = Math.min(Number(data.timeoutMs) || 0, 86400000);
+          if (tmo > 0) a.timer = setTimeout(() => askResolve(a, { answered: false, reason: 'timeout' }), Math.max(1000, tmo));
+          res.on('close', () => askResolve(a, { answered: false, reason: 'gone' }, true));
+          askQueue.push(a);
+          pushInbox(`${label.toLowerCase()} asks: ${question.slice(0, 80).replace(/\n/g, ' ')}`, 'ask');
+          maybeShowNextAsk();
+          return; // held until answered / dismissed / timeout / disconnect
         }
         if (p.startsWith('/hook/claude/')) {
           const route = p.slice('/hook/claude/'.length);
@@ -1444,14 +1544,15 @@ function registerHotkey() {
 
 // ----------------------------------------------------- answer routing (ask)
 async function focusQuestionWindow(q, alsoType, answerIndex) {
+  const pressEnter = store.get().voice.agentEnter === true;
   if (TEST) {
-    askCalls.push({ qid: q.qid, index: answerIndex, typed: !!alsoType });
+    askCalls.push({ qid: q.qid, index: answerIndex, typed: !!alsoType, enter: pressEnter });
     return { located: true, app: 'TEST', typed: !!alsoType };
   }
   const loc = await focusTty(q.tty);
   let typed = false;
   if (loc.located && alsoType && store.get().agent.autoType !== false) {
-    const r = await typeKeys(String(answerIndex + 1));
+    const r = await typeKeys(String(answerIndex + 1), { pressEnter });
     typed = r.ok;
   }
   return { located: loc.located, app: loc.app, typed };
@@ -1460,8 +1561,16 @@ async function focusQuestionWindow(q, alsoType, answerIndex) {
 function setupAskIpc() {
   ipcMain.on('ask:answer', async (e, { qid, index }) => {
     const q = pendingQuestion;
-    if (!q || q.qid !== qid || !q.canType) return;
+    if (!q || q.qid !== qid) return;
     if (index < 0 || index >= q.options.length) return;
+    if (q.external) {
+      // the held /ask response IS the answer channel — no typing involved
+      const a = askQueue.find((x) => x.askId === q.askId);
+      const opt = a && a.options[index];
+      if (a && opt) askResolve(a, { answered: true, id: opt.id, label: opt.label });
+      return;
+    }
+    if (!q.canType) return;
     const r = await focusQuestionWindow(q, true, index);
     send('ask-result', { qid, ...r });
   });
@@ -1471,7 +1580,14 @@ function setupAskIpc() {
     const r = await focusQuestionWindow(q, false, 0);
     send('ask-result', { qid, ...r });
   });
-  ipcMain.on('ask:dismiss', (e, { qid }) => clearQuestion(qid));
+  ipcMain.on('ask:dismiss', (e, { qid }) => {
+    const q = pendingQuestion;
+    if (q && q.qid === qid && q.external) {
+      const a = askQueue.find((x) => x.askId === q.askId);
+      if (a) return askResolve(a, { answered: false, reason: 'dismissed' });
+    }
+    clearQuestion(qid);
+  });
   ipcMain.on('led:click', async () => {
     // jump to the most relevant session: question > alert > newest working
     let target = null;
@@ -2182,6 +2298,7 @@ app.on('window-all-closed', (e) => {
 
 app.on('will-quit', () => {
   transcribeLib.cleanupStale(); // stray voice recordings from crashes
+  try { askShutdown(); } catch { /* no held asks */ }
   try { if (store) store.flush(); } catch { /* best effort on the way out */ }
   try { if (agentServer) agentServer.close(); } catch { /* already down */ }
   try { if (uiohookRef) uiohookRef.stop(); } catch { /* never started */ }

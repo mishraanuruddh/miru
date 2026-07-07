@@ -451,7 +451,7 @@
     const q = st.question;
     if (q && inBox(X, Y, q.panelBox)) {
       const opt = q.boxes.findIndex((b) => inBox(X, Y, b));
-      if (opt >= 0 && q.canType && !q.status.startsWith('typed')) {
+      if (opt >= 0 && (q.canType || q.external) && !q.status.startsWith('typed')) {
         q.status = 'sending';
         miru.askAnswer(q.qid, opt);
         CatAudio.pop();
@@ -1215,19 +1215,56 @@
   // interactive question panel: actual options from AskUserQuestion
   function drawQuestionPanel(bottomY) {
     const q = st.question;
-    const px = 2;
-    const w = Math.min(W - 16, 330);
+    const w = Math.min(W - 20, 360);
     const x = W / 2 - w / 2;
-    const lh = 7 * px;
-    const qAll = wrapText(q.question.toUpperCase(), w - 20, px, 99);
-    const qLines = qAll.slice(0, 5);
-    const qMore = qAll.length - qLines.length;
-    const moreH = qMore > 0 ? 10 : 0;
-    const optH = 16;
-    const showOptions = q.options.length > 0;
-    const footH = 16;
-    const noteH = q.canType ? 0 : 12;
-    const h = 16 + qLines.length * lh + moreH + 4 + (showOptions ? q.options.length * (optH + 3) : 0) + noteH + footH + 8;
+    const chipH = 16;
+    const availH = bottomY - 12; // everything above the cat is fair game
+
+    // chips flow left-to-right like the confirm panel, sized to their labels;
+    // a description renders as a smaller gray second line inside the chip
+    const rows = [];
+    {
+      let row = [], rowW = 0;
+      q.options.forEach((opt, i) => {
+        const numW = PixelFont.measure(String(i + 1), 1.5);
+        const inset = 7 + numW + 5;
+        const need = (t) => inset + PixelFont.measure(t.toUpperCase(), 1.5) + 7;
+        const cw = Math.min(w - 16, Math.max(40, need(opt.label), opt.desc ? need(opt.desc) : 0));
+        const descLines = opt.desc ? wrapText(opt.desc.toUpperCase(), cw - inset - 7, 1.5, 2) : [];
+        const chH = chipH + (descLines.length ? descLines.length * 10 + 2 : 0);
+        if (rowW + cw + 4 > w - 16 && row.length) { rows.push(row); row = []; rowW = 0; }
+        row.push({ opt, i, w: cw, numW, inset, descLines, h: chH });
+        rowW += cw + 4;
+      });
+      if (row.length) rows.push(row);
+    }
+    const chipsH = rows.reduce((s, r) => s + Math.max(...r.map((c) => c.h)) + 3, 0);
+    const fixedH = 16 + 4 + chipsH + 16 + 8; // title + gap + chips + footer + pad
+
+    // the question gets the rest: full size first, caption size under
+    // pressure, and only then a head+tail cut that keeps the actual ask
+    let qpx = 2, lh = 14, qAll = [], maxL = 1;
+    for (const tryPx of [2, 1.5]) {
+      qpx = tryPx;
+      lh = Math.round(7 * tryPx);
+      qAll = wrapText(q.question.toUpperCase(), w - 20, tryPx, 99);
+      maxL = Math.max(1, Math.floor((availH - fixedH) / lh));
+      if (qAll.length <= maxL) break;
+    }
+    let qLines = qAll, hidden = 0;
+    if (qAll.length > maxL) {
+      maxL = Math.max(1, Math.floor((availH - fixedH - 10) / lh)); // hint line
+      if (maxL >= 3) {
+        qLines = qAll.slice(0, maxL - 2).concat(['...'], qAll.slice(-1));
+        hidden = qAll.length - (maxL - 1);
+      } else {
+        qLines = qAll.slice(0, maxL);
+        hidden = qAll.length - maxL;
+      }
+    }
+    q.qHidden = hidden;
+    q.qFontPx = qpx;
+    const h = 16 + qLines.length * lh + (hidden ? 10 : 0) + 4 + chipsH + 16 + 8;
     const y = bottomY - h - 8;
 
     // frame
@@ -1245,51 +1282,46 @@
     ctx.fillStyle = '#ffd400';
     ctx.fillRect(x, y, w, 12);
     const title = `${q.agent} ASKS${q.header ? ' · ' + q.header.toUpperCase() : ''}`;
-    PixelFont.draw(ctx, fitText(title, px, w - 12), x + 6, y + 3, px, '#14131a');
+    PixelFont.draw(ctx, fitText(title, 2, w - 12), x + 6, y + 3, 2, '#14131a');
 
     let cy = y + 16;
     for (const line of qLines) {
-      PixelFont.draw(ctx, line, x + 8, cy, px, '#14131a');
+      PixelFont.draw(ctx, line, x + 8, cy, qpx, '#14131a');
       cy += lh;
     }
-    if (qMore > 0) {
-      PixelFont.draw(ctx, `+${qMore} MORE LINE${qMore > 1 ? 'S' : ''} IN THE TERMINAL`,
+    if (hidden > 0) {
+      PixelFont.draw(ctx, `+${hidden} MORE LINE${hidden > 1 ? 'S' : ''} IN THE TERMINAL`,
         x + 8, cy + 1, 1.5, '#8a8794');
-      cy += moreH;
+      cy += 10;
     }
     cy += 4;
 
+    const clickable = q.canType || q.external;
     q.boxes = [];
-    if (showOptions) {
-      q.options.forEach((label, i) => {
-        const bx = x + 8, bw = w - 16, by = cy;
-        const hovered = q.hover === i && q.canType;
+    for (const r of rows) {
+      let bx = x + 8;
+      const rowH = Math.max(...r.map((c) => c.h));
+      for (const ch of r) {
+        const hovered = q.hover === ch.i && clickable;
         ctx.fillStyle = '#14131a';
-        ctx.fillRect(bx - 1, by - 1, bw + 2, optH + 2);
-        ctx.fillStyle = hovered ? '#ffd400' : q.canType ? '#2a2933' : '#3a3942';
-        ctx.fillRect(bx, by, bw, optH);
-        const fg = hovered ? '#14131a' : '#fdf8ec';
-        PixelFont.draw(ctx, String(i + 1), bx + 5, by + 5, px, hovered ? '#14131a' : '#ffd400');
-        PixelFont.draw(ctx, fitText(label.toUpperCase(), px, bw - 24), bx + 16, by + 5, px, fg);
-        q.boxes.push({ x: bx, y: by, w: bw, h: optH });
-        cy += optH + 3;
-      });
+        ctx.fillRect(bx - 1, cy - 1, ch.w + 2, ch.h + 2);
+        ctx.fillStyle = hovered ? '#ffd400' : clickable ? '#2a2933' : '#3a3942';
+        ctx.fillRect(bx, cy, ch.w, ch.h);
+        PixelFont.draw(ctx, String(ch.i + 1), bx + 7, cy + 5, 1.5, hovered ? '#14131a' : '#ffd400');
+        PixelFont.draw(ctx, fitText(ch.opt.label.toUpperCase(), 1.5, ch.w - ch.inset - 7),
+          bx + ch.inset, cy + 5, 1.5, hovered ? '#14131a' : '#fdf8ec');
+        ch.descLines.forEach((dl, di) => {
+          PixelFont.draw(ctx, dl, bx + ch.inset, cy + 15 + di * 10, 1.5,
+            hovered ? '#4a4433' : '#8a8794');
+        });
+        q.boxes.push({ x: bx, y: cy, w: ch.w, h: ch.h });
+        bx += ch.w + 4;
+      }
+      cy += rowH + 3;
     }
 
-    if (!q.canType) {
-      PixelFont.draw(ctx, q.multiSelect ? 'MULTI-SELECT: ANSWER IN TERMINAL' : 'ANSWER IN TERMINAL', x + 8, cy + 1, 1.5, '#8a8794');
-      cy += noteH;
-    }
-
-    // footer: status or buttons
+    // footer: status (or how-to-answer note) left, buttons right
     const fy = cy + 2;
-    let statusText = null;
-    if (q.status.startsWith('typed:')) statusText = 'TYPED INTO ' + q.status.slice(6).toUpperCase();
-    else if (q.status.startsWith('focused:')) statusText = 'OPENED ' + q.status.slice(8).toUpperCase();
-    else if (q.status === 'notfound') statusText = 'WINDOW NOT FOUND';
-    if (statusText) {
-      PixelFont.draw(ctx, statusText, x + 8, fy + 3, 1.5, '#8a8794');
-    }
     const mkBtn = (label, bx) => {
       const bw = PixelFont.measure(label, 1.5) + 10;
       ctx.fillStyle = '#14131a';
@@ -1299,6 +1331,15 @@
     };
     q.dismissBox = mkBtn('DISMISS', x + w - 6);
     q.openBox = q.tty ? mkBtn('OPEN', q.dismissBox.x - 5) : null;
+    let leftText = null;
+    if (q.status.startsWith('typed:')) leftText = 'TYPED INTO ' + q.status.slice(6).toUpperCase();
+    else if (q.status.startsWith('focused:')) leftText = 'OPENED ' + q.status.slice(8).toUpperCase();
+    else if (q.status === 'notfound') leftText = 'WINDOW NOT FOUND';
+    else if (!clickable) leftText = q.multiSelect ? 'MULTI-SELECT: ANSWER IN TERMINAL' : 'ANSWER IN TERMINAL';
+    if (leftText) {
+      const leftMax = (q.openBox ? q.openBox.x : q.dismissBox.x) - (x + 8) - 8;
+      PixelFont.draw(ctx, fitText(leftText, 1.5, leftMax), x + 8, fy + 3, 1.5, '#8a8794');
+    }
 
     q.panelBox = { x: x - 2, y: y - 2, w: w + 4, h: h + 6 };
     return y;
@@ -1853,6 +1894,9 @@
     question: st.question ? {
       qid: st.question.qid,
       text: st.question.question,
+      external: !!st.question.external,
+      qHidden: st.question.qHidden || 0,
+      qFontPx: st.question.qFontPx || 2,
       options: st.question.options,
       canType: st.question.canType,
       status: st.question.status,

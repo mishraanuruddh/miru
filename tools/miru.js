@@ -4,6 +4,7 @@
 //   miru say "deploy finished"
 //   miru todo "review the PR"
 //   miru tasks
+//   miru ask "question" -o "option a" -o "option b"
 //   miru done <task-id-prefix>
 //   miru agent thinking|done|alert [--agent codex]
 //   miru menu | show | hide | status
@@ -59,6 +60,35 @@ async function main() {
       console.log(`agent ${agent}: ${state}.`);
       break;
     }
+    case 'ask': {
+      // miru ask "Cancel the 3pm?" -o "Yes: decline + notify" -o "Keep it" [--timeout 300] [--agent name]
+      // blocks until the user answers on the cat; prints the chosen label
+      const opts = [];
+      const words = [];
+      let agent = 'script', timeoutMs = 0;
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === '-o') {
+          const v = String(rest[++i] || '');
+          const ci = v.indexOf(':');
+          const label = (ci >= 0 ? v.slice(0, ci) : v).trim();
+          const description = ci >= 0 ? v.slice(ci + 1).trim() : '';
+          if (label) opts.push({ label, description });
+        } else if (rest[i] === '--agent') agent = rest[++i] || agent;
+        else if (rest[i] === '--timeout') timeoutMs = (Number(rest[++i]) || 0) * 1000;
+        else words.push(rest[i]);
+      }
+      const question = words.join(' ');
+      if (!question || !opts.length) {
+        die('usage: miru ask "question" -o "label[: description]" [-o ...] [--timeout seconds] [--agent name]');
+      }
+      const body = { agent, question, options: opts };
+      if (timeoutMs > 0) body.timeoutMs = timeoutMs;
+      const r = await post('/ask', body);
+      if (!r.ok) die('the cat could not ask: ' + (r.error || 'unknown error'));
+      if (!r.answered) die('no answer: ' + r.reason);
+      console.log(r.label);
+      break;
+    }
     case 'talk': {
       // with text: route it through the cat's brain; without: toggle listening
       const text = rest.join(' ').trim();
@@ -85,6 +115,7 @@ usage:
   miru say "message"            speech bubble + inbox
   miru todo "task"              add to the cat's task list
   miru tasks                    list tasks
+  miru ask "q" -o "a" -o "b"    ask via the cat, wait, print the answer
   miru agent <state> [--agent n]  thinking|done|alert|idle
   miru talk ["utterance"]       route through the cat's brain (no text = listen)
   miru menu|show|hide           control the cat

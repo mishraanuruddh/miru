@@ -428,7 +428,7 @@ async function runScenarios(ctx) {
       return x.question && x.question.boxes.length === 2 ? x : null;
     }, 'question panel with 2 options');
     assert(d.question.canType === true, 'canType false');
-    assert(d.question.options[1] === 'Proper fix with tests', 'options=' + JSON.stringify(d.question.options));
+    assert(d.question.options[1].label === 'Proper fix with tests', 'options=' + JSON.stringify(d.question.options));
     await cap('question-panel');
 
     // click option 2
@@ -441,6 +441,7 @@ async function runScenarios(ctx) {
     mouse({ type: 'mouseUp', x: cx, y: cy, button: 'left', clickCount: 1 });
     await waitFor(() => askCalls.length > before, 'answer routed to main');
     assert(askCalls[askCalls.length - 1].index === 1, 'wrong option index: ' + JSON.stringify(askCalls));
+    assert(askCalls[askCalls.length - 1].enter === true, 'clicked answers should submit by default: ' + JSON.stringify(askCalls[askCalls.length - 1]));
     await waitFor(async () => {
       const x = await debug();
       return x.question && x.question.status.startsWith('typed');
@@ -1268,7 +1269,7 @@ async function runScenarios(ctx) {
     await waitFor(async () => askCalls.length > before, 'typed');
     const call = askCalls[askCalls.length - 1];
     assert(call.voiceType && call.voiceType.tty === 'ttys042' &&
-      call.voiceType.text === 'fix the failing palette test' && call.voiceType.enter === false,
+      call.voiceType.text === 'fix the failing palette test' && call.voiceType.enter === true,
       JSON.stringify(call));
     await post('/hook/claude/end', { session_id: 'vs1' });
   });
@@ -1479,16 +1480,42 @@ async function runScenarios(ctx) {
       const x = await debug();
       return x.question && x.question.boxes.length === 3 ? x : null;
     }, '3 option chips drawn');
-    assert(d.question.options[0] === 'Extract the module then add tests then migrate callers',
-      'collapse wrong: ' + JSON.stringify(d.question.options[0]));
+    assert(d.question.options[0].label === 'Extract the module' &&
+      d.question.options[0].desc === 'then add tests then migrate callers',
+      'label/desc split wrong: ' + JSON.stringify(d.question.options[0]));
     for (const o of d.question.options) {
-      assert(!/[\n\r\t]/.test(o), 'raw whitespace leaked into option: ' + JSON.stringify(o));
+      assert(!/[\n\r\t]/.test(o.label + (o.desc || '')), 'raw whitespace leaked into option: ' + JSON.stringify(o));
     }
     const p = d.question.panelBox;
     for (const b of d.question.boxes) {
       assert(b.x >= p.x && b.x + b.w <= p.x + p.w, 'chip overflows panel: ' + JSON.stringify(b));
     }
     await cap('wild-ask-multiline');
+    await askCleared();
+  });
+
+  await scenario('wild output: option descriptions render as a second chip line', async () => {
+    await post('/hook/claude/ask', { session_id: 'wild9', tool_input: { questions: [{
+      question: 'How should the migration run?',
+      options: [
+        { label: 'Copy then swap', description: 'zero downtime, needs 2x disk' },
+        { label: 'Alter in place', description: 'brief lock, no extra disk' },
+        { label: 'Neither, let me think' },
+      ],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 3 ? x : null;
+    }, '3 chips drawn');
+    assert(d.question.options[0].desc === 'zero downtime, needs 2x disk',
+      'description lost: ' + JSON.stringify(d.question.options[0]));
+    assert(d.question.boxes[0].h > 20, 'desc chip should be taller: ' + JSON.stringify(d.question.boxes[0]));
+    assert(d.question.boxes[2].h === 16, 'no-desc chip stays single-line: ' + JSON.stringify(d.question.boxes[2]));
+    const p = d.question.panelBox;
+    for (const b of d.question.boxes) {
+      assert(b.x + b.w <= p.x + p.w && b.y + b.h <= p.y + p.h, 'chip outside panel: ' + JSON.stringify(b));
+    }
+    await cap('wild-ask-descriptions');
     await askCleared();
   });
 
@@ -1668,6 +1695,7 @@ async function runScenarios(ctx) {
     // structure is content: the numbered list must survive to the renderer
     assert(d.question.text.split('\n').length === 6,
       'authored breaks lost: ' + JSON.stringify(d.question.text));
+    assert(d.question.qHidden === 0, 'short question should fit whole, hid ' + d.question.qHidden);
     // the taller structured panel must still stay inside its border
     const leak = await catWin.webContents.executeJavaScript(`
       (() => {
@@ -1691,6 +1719,143 @@ async function runScenarios(ctx) {
     assert(leak === 0, leak + ' pixels painted beyond the panel edge');
     await cap('wild-ask-structured');
     await askCleared();
+  });
+
+  await scenario('wild output: a long question shrinks to caption size and fits whole', async () => {
+    const lines = [];
+    for (let i = 1; i <= 9; i++) lines.push(i + '. memory mapped worker window management area');
+    await post('/hook/claude/ask', { session_id: 'wild7', tool_input: { questions: [{
+      question: 'Here is everything I noticed:\n' + lines.join('\n') + '\nWhere should I start?',
+      options: [{ label: 'Top' }, { label: 'Bottom' }],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 2 ? x : null;
+    }, 'panel with 2 chips');
+    assert(d.question.qHidden === 0, 'nothing may hide at this length, hid ' + d.question.qHidden);
+    assert(d.question.qFontPx < 2, 'expected the caption-size fallback, got px ' + d.question.qFontPx);
+    await cap('wild-ask-shrink-fit');
+    await askCleared();
+  });
+
+  await scenario('wild output: worst case still keeps the final ask visible', async () => {
+    // a giant cat steals panel height: the head+tail cut must kick in
+    store.set({ scale: 10 });
+    broadcastSettings();
+    await wait(300);
+    const lines = [];
+    for (let i = 1; i <= 10; i++) lines.push(i + '. memory mapped module worker window management member');
+    await post('/hook/claude/ask', { session_id: 'wild8', tool_input: { questions: [{
+      question: lines.join('\n') + '\nWhich module first?',
+      options: [{ label: 'First' }, { label: 'Last' }],
+    }] } });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.boxes.length === 2 ? x : null;
+    }, 'panel with 2 chips');
+    assert(d.question.qHidden > 0, 'expected a hidden middle at giant scale');
+    const leak = await catWin.webContents.executeJavaScript(`
+      (() => {
+        const q = window.__catDebug().question;
+        if (!q || !q.panelBox) return -1;
+        const cv = document.getElementById('cat');
+        const dpr = window.devicePixelRatio || 1;
+        const img = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+        const x0 = Math.ceil((q.panelBox.x + q.panelBox.w + 2) * dpr);
+        const y0 = Math.ceil(q.panelBox.y * dpr);
+        const y1 = Math.floor((q.panelBox.y + q.panelBox.h - 10) * dpr);
+        let n = 0;
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x < cv.width; x++) {
+            if (img[(y * cv.width + x) * 4 + 3] > 60) n++;
+          }
+        }
+        return n;
+      })()
+    `);
+    assert(leak === 0, leak + ' pixels painted beyond the panel edge');
+    await cap('wild-ask-worst-case');
+    await askCleared();
+    store.set({ scale: 4 });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).catBBox.h < 130, 'scale restored');
+  });
+
+  // --------------------------------------------------- external ask channel
+  // POST /ask holds its response open; the user's chip click IS the reply
+
+  await scenario('external ask: a chip click answers the caller over the wire', async () => {
+    const held = httpPost(port(), '/ask', {
+      agent: 'chief-of-staff',
+      question: 'Cancel the 3pm sync?\nIt collides with the design review.',
+      options: [
+        { label: 'Cancel it', description: 'decline + notify attendees' },
+        { id: 'keep', label: 'Keep it' },
+      ],
+    });
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.external && x.question.boxes.length === 2 ? x : null;
+    }, 'external panel drawn');
+    assert(d.question.text.includes('\n'), 'question structure lost');
+    await cap('external-ask');
+    clickBox(d.question.boxes[1]);
+    const r = JSON.parse((await held).body);
+    assert(r.ok && r.answered === true && r.id === 'keep' && r.label === 'Keep it',
+      'wire answer wrong: ' + JSON.stringify(r));
+    assert(r.elapsedMs >= 0, 'missing elapsedMs');
+    await waitFor(async () => !(await debug()).question, 'panel cleared');
+    const inb = store.get().inboxLog || [];
+    assert(inb.some((e) => /you answered chief/.test(e.text)), 'answer trail missing from inbox');
+  });
+
+  await scenario('external ask: queue holds, timeout resolves, dismiss answers no', async () => {
+    const heldA = httpPost(port(), '/ask', { agent: 'cos', question: 'First question?', options: [{ label: 'Yes' }] });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.external && x.question.dismissBox ? x : null;
+    }, 'first ask drawn');
+    const heldB = httpPost(port(), '/ask', {
+      agent: 'cos', question: 'Second question?', options: [{ label: 'Ok' }], timeoutMs: 1200,
+    });
+    const rb = JSON.parse((await heldB).body);
+    assert(rb.ok && rb.answered === false && rb.reason === 'timeout',
+      'queued ask should time out quietly: ' + JSON.stringify(rb));
+    const d = await debug();
+    assert(d.question && d.question.external, 'first ask must still be showing');
+    clickBox(d.question.dismissBox);
+    const ra = JSON.parse((await heldA).body);
+    assert(ra.ok && ra.answered === false && ra.reason === 'dismissed',
+      'dismiss should answer no: ' + JSON.stringify(ra));
+    await waitFor(async () => !(await debug()).question, 'panel cleared');
+  });
+
+  await scenario('external ask: a live claude question preempts, then the ask returns', async () => {
+    const held = httpPost(port(), '/ask', {
+      agent: 'cos', question: 'Approve the weekly summary?',
+      options: [{ label: 'Approve' }, { label: 'Edit first' }],
+    });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.external && x.question.boxes.length === 2 ? x : null;
+    }, 'external ask drawn');
+    await post('/hook/claude/ask', { session_id: 'pre1', tool_input: { questions: [{
+      question: 'Claude needs this first.', options: [{ label: 'Fine' }],
+    }] } });
+    await waitFor(async () => {
+      const x = await debug();
+      return x.question && !x.question.external ? x : null;
+    }, 'claude question took over');
+    await post('/test/sessions-clear', {});
+    const d = await waitFor(async () => {
+      const x = await debug();
+      return x.question && x.question.external && x.question.boxes.length === 2 ? x : null;
+    }, 'external ask came back drawn');
+    clickBox(d.question.boxes[0]);
+    const r = JSON.parse((await held).body);
+    assert(r.ok && r.answered === true && r.label === 'Approve',
+      'requeued ask lost its answer: ' + JSON.stringify(r));
+    await waitFor(async () => !(await debug()).question, 'panel cleared');
   });
 
   // ------------------------------------------------------------------ report

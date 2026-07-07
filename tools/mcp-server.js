@@ -27,6 +27,32 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'ask_user',
+    description: 'Ask the user a question via the desktop cat and wait for their answer. Blocks until they click an option (or dismiss). Returns the chosen option. Use for decisions only the user can make.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The question. Line breaks allowed (~500 chars); keep it scannable.' },
+        options: {
+          type: 'array',
+          description: '1-4 choices',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', description: 'Stable id returned to you (defaults to the option number)' },
+              label: { type: 'string', description: 'Short chip label (~60 chars)' },
+              description: { type: 'string', description: 'Optional one-line detail shown under the label' },
+            },
+            required: ['label'],
+          },
+        },
+        agent: { type: 'string', description: 'Short name shown to the user as the asker (default: mcp)' },
+        timeoutS: { type: 'number', description: 'Optional deadline in seconds. Default: wait indefinitely.' },
+      },
+      required: ['question', 'options'],
+    },
+  },
+  {
     name: 'cat_voice',
     description: "Route a natural-language command through the desktop cat's brain: to-dos ('remind me to X at 4pm'), notes ('note: ...'), open apps, or captures. The user confirms via chips on the cat before anything happens.",
     inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'One short utterance' } }, required: ['text'] },
@@ -55,6 +81,14 @@ async function callTool(name, args) {
     case 'cat_status': {
       const s = await (await fetch(BASE + '/status')).json();
       return JSON.stringify(s, null, 2);
+    }
+    case 'ask_user': {
+      const body = { agent: String(args.agent || 'mcp'), question: String(args.question || ''), options: args.options };
+      if (Number(args.timeoutS) > 0) body.timeoutMs = Math.round(Number(args.timeoutS) * 1000);
+      const r = await post('/ask', body);
+      if (!r.ok) return 'The cat could not ask: ' + (r.error || 'unknown error');
+      if (!r.answered) return `No answer from the user (${r.reason} after ${Math.round((r.elapsedMs || 0) / 1000)}s). Re-ask later or proceed conservatively.`;
+      return `The user chose: "${r.label}" (id: ${r.id}, answered after ${Math.round((r.elapsedMs || 0) / 1000)}s).`;
     }
     case 'cat_voice': {
       const r = await post('/voice', { text: String(args.text || '') });
