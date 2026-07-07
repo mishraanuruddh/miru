@@ -81,7 +81,7 @@
     wakeUntil: -1e9,    // surprise "!" on wake
     sleepingSince: 0,
     hunt: { phase: 'none', dir: 1 },
-    drag: { active: false, vx: 0, vy: 0, sy: 1, springV: 0, shear: 0, wobble: 0, releasedT: -1e9 },
+    drag: { active: false, vx: 0, vy: 0, vxS: 0, prevVxS: 0, sy: 1, springV: 0, shear: 0, wobble: 0, swing: 0, swingV: 0, releasedT: -1e9 },
     bubble: null,       // {text, until, kind}
     pom: null,
     blinkUntil: -1e9,
@@ -153,7 +153,7 @@
     } else if (d.phase === 'end') {
       st.drag.active = false;
       st.drag.releasedT = now();
-      st.drag.springV = (st.drag.sy - 1) * -8;
+      st.drag.vx = 0; st.drag.vy = 0; // the hold point stops with the hand
     }
   });
 
@@ -600,25 +600,29 @@
       st.modeT += dt;
     }
 
-    // drag mochi physics
+    // drag physics: the head rides the hand as-is; the body below the neck
+    // is a real pendulum hanging from a moving pivot — gravity restores,
+    // damping settles, and the pivot's acceleration is what kicks it (jerk
+    // the window left and the body genuinely gets left behind)
     const d = st.drag;
-    if (d.active) {
-      const speed = Math.hypot(d.vx, d.vy);
-      const target = 1 + Math.min(0.65, speed / 2600);
-      d.sy += (target - d.sy) * Math.min(1, dt * 14);
-      const shearTarget = Math.max(-0.45, Math.min(0.45, -d.vx / 1800));
-      d.shear += (shearTarget - d.shear) * Math.min(1, dt * 10);
-      d.vx *= 0.86; d.vy *= 0.86;
-    } else if (t - d.releasedT < 900) {
-      // damped spring back to 1
-      const k = 90, c = 9;
-      const a = -k * (d.sy - 1) - c * d.springV;
-      d.springV += a * dt;
-      d.sy += d.springV * dt;
-      d.shear *= Math.max(0, 1 - dt * 8);
+    if (d.active || Math.abs(d.swing) > 0.004 || Math.abs(d.swingV) > 0.02) {
+      const px4 = settings.scale || 4;
+      const armPx = Math.max(20, 24 * px4);            // pendulum arm length
+      d.vxS += (d.vx - d.vxS) * Math.min(1, dt * 18);  // smoothed hold velocity
+      const ax = (d.vxS - d.prevVxS) / Math.max(dt, 0.001);
+      d.prevVxS = d.vxS;
+      const G = 2400; // px/s^2 — tuned for a ~0.8Hz natural sway
+      // gravity restores on the true arm; the hand's acceleration drives on
+      // a 4x longer effective arm so ordinary drags sway instead of whipping
+      const acc = -G * Math.sin(d.swing) / armPx
+        - ax * Math.cos(d.swing) / (armPx * 4)
+        - d.swingV * 4;
+      d.swingV += acc * dt;
+      d.swing = Math.max(-0.45, Math.min(0.45, d.swing + d.swingV * dt));
     } else {
-      d.sy = 1; d.springV = 0; d.shear = 0;
+      d.swing = 0; d.swingV = 0; d.vxS = 0; d.prevVxS = 0;
     }
+    d.sy = 1; d.shear = 0;
 
     // confirm auto-countdown: pauses while pondered (hover / menu open),
     // fires the primary chip once when it runs out
@@ -842,13 +846,13 @@
     const { f: frame, flip } = pickFrame();
     const t = now();
 
-    // scale animation for stretch mode
+    // gentle swell for the play-bow stretch — the pose itself carries it
     let anim = 1;
     if (st.mode === 'stretch') {
       const k = Math.min(1, st.modeT / 0.8);
       const remain = (st.stretchUntil - t) / 1000;
       const out = remain < 0.8 ? Math.max(0, remain / 0.8) : 1;
-      anim = 1 + 0.55 * Math.min(k, out) + Math.sin(t / 300) * 0.02;
+      anim = 1 + 0.08 * Math.min(k, out) + Math.sin(t / 300) * 0.015;
     }
 
     // hop offset (celebrate / quick hops / leap)
@@ -923,6 +927,8 @@
       faceInk: faceInk(),
       freckles: settings.spriteStyle !== 'classic',
       tilt: t < st.tiltUntil ? st.tiltDir : 0,
+      // pendulum angle -> sideways cells at the bottom row of the frame
+      swing: frame.pivot != null ? Math.tan(d.swing) * (frame.h - 1 - frame.pivot) : 0,
       style: settings.skinStyle || 'plain',
       overrides: settings.pixelOverrides || null,
     });
@@ -1517,9 +1523,11 @@
       el.appendChild(c);
     } else if (opts.giftId) {
       const cv = document.createElement('canvas');
-      cv.width = 18; cv.height = 18;
+      // 9x9 art + the sticker keyline/rim rings (2 cells each side) at px 2
+      cv.width = 26; cv.height = 26;
       cv.className = 'ic';
-      drawGift(cv.getContext('2d'), opts.giftId, 0, 0, 2);
+      cv.style.width = '26px'; cv.style.height = '26px'; // rings need the room
+      drawGift(cv.getContext('2d'), opts.giftId, 4, 4, 2);
       el.appendChild(cv);
     } else {
       el.appendChild(mkIcon(opts.icon || 'dot', opts.iconColor));

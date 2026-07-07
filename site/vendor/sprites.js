@@ -14,6 +14,10 @@
     L: 'headL', R: 'headR', M: 'muzzle', i: 'innerEar', n: 'nose',
     B: 'body', C: 'chest', F: 'paws', T: 'tail', t: 'tailTip', w: 'outline',
     P: 'pawUp', // raised paw: auto-shaded vs the fur so it reads on solid cats
+    G: 'marking', // gray patches: collar, cheek dots, tail + haunch shading
+    D: 'shading', // deep creases: inner ear, under the stretch arch
+    p: 'tongue', // the grooming lick — pink on every coat
+    K: 'keycap', // typing keys: contrast with the skin's line color
   };
 
   // ------------------------------------------------------------------ skins
@@ -24,49 +28,49 @@
       headL: '#23212b', headR: '#23212b', muzzle: '#23212b', body: '#23212b',
       chest: '#23212b', paws: '#23212b', tail: '#23212b', tailTip: '#23212b',
       innerEar: '#f2a0b5', nose: '#f2a0b5', iris: '#ffffff', pupil: '#23212b',
-      outline: CREAM,
+      outline: '#fefefe', marking: '#332f3d', shading: '#413c4d', rim: '#181818',
     },
     white: {
       label: 'White',
-      headL: '#f6f3ec', headR: '#f6f3ec', muzzle: '#f6f3ec', body: '#f6f3ec',
-      chest: '#f6f3ec', paws: '#f6f3ec', tail: '#f6f3ec', tailTip: '#e6e0d2',
-      innerEar: '#f5b6c6', nose: '#ef8aa0', iris: '#ffffff', pupil: '#3a3644',
-      outline: '#8f89a0',
+      headL: '#fefefe', headR: '#fefefe', muzzle: '#fefefe', body: '#fefefe',
+      chest: '#fefefe', paws: '#fefefe', tail: '#fefefe', tailTip: '#fefefe',
+      innerEar: '#b0b0b0', nose: '#181818', iris: '#ffffff', pupil: '#181818',
+      outline: '#181818', marking: '#b0b0b0', shading: '#7d7f7a', rim: '#fefefe',
     },
     gray: {
       label: 'Gray',
       headL: '#9298a5', headR: '#9298a5', muzzle: '#9298a5', body: '#9298a5',
       chest: '#d9dde3', paws: '#9298a5', tail: '#9298a5', tailTip: '#7c8290',
-      innerEar: '#f2a0b5', nose: '#e98ba2', iris: '#ffffff', pupil: '#2e3138',
-      outline: CREAM,
+      innerEar: '#f2a0b5', nose: '#e98ba2', iris: '#ffffff', pupil: '#181818',
+      outline: '#181818', marking: '#767d8b', shading: '#5d626d', rim: '#fefefe',
     },
     orange: {
       label: 'Orange',
       headL: '#ef9d3e', headR: '#ef9d3e', muzzle: '#f8e0b4', body: '#ef9d3e',
       chest: '#f8e0b4', paws: '#ef9d3e', tail: '#ef9d3e', tailTip: '#d97f23',
       innerEar: '#f7bba8', nose: '#e98b78', iris: '#ffffff', pupil: '#54381c',
-      outline: CREAM,
+      outline: '#181818', marking: '#d97f23', shading: '#b5651d', rim: '#fefefe',
     },
     calico: {
       label: 'Calico',
-      headL: '#ef9d3e', headR: '#3a3640', muzzle: '#f6f3ec', body: '#f6f3ec',
-      chest: '#f6f3ec', paws: '#f6f3ec', tail: '#3a3640', tailTip: '#ef9d3e',
-      innerEar: '#f5b6c6', nose: '#ef8aa0', iris: '#ffffff', pupil: '#3a3644',
-      outline: '#8f89a0',
+      headL: '#ef9d3e', headR: '#3a3640', muzzle: '#fefefe', body: '#fefefe',
+      chest: '#fefefe', paws: '#fefefe', tail: '#3a3640', tailTip: '#ef9d3e',
+      innerEar: '#f5b6c6', nose: '#ef8aa0', iris: '#ffffff', pupil: '#181818',
+      outline: '#181818', marking: '#ef9d3e', shading: '#b0742e', rim: '#fefefe',
     },
     tuxedo: {
       label: 'Tuxedo',
       headL: '#2e2b35', headR: '#2e2b35', muzzle: '#f6f3ec', body: '#2e2b35',
       chest: '#f6f3ec', paws: '#f6f3ec', tail: '#2e2b35', tailTip: '#2e2b35',
       innerEar: '#f2a0b5', nose: '#ef8aa0', iris: '#ffffff', pupil: '#2e2b35',
-      outline: CREAM,
+      outline: CREAM, marking: '#3d3947', shading: '#4a4556', rim: '#181818',
     },
     siamese: {
       label: 'Siamese',
       headL: '#efe6d2', headR: '#efe6d2', muzzle: '#6b5340', body: '#efe6d2',
       chest: '#efe6d2', paws: '#6b5340', tail: '#5b4634', tailTip: '#5b4634',
       innerEar: '#caa68f', nose: '#4a3527', iris: '#ffffff', pupil: '#3e7eb8',
-      outline: '#8f89a0',
+      outline: '#181818', marking: '#d6c8ac', shading: '#8a7660', rim: '#fefefe',
     },
   };
 
@@ -200,7 +204,7 @@
 
   // dragged / hanging (mochi): long narrow body, paws up by chest, feet dangle
   FRAMES.hang = {
-    w: 24, h: 26, eyes: EYES_FRONT, mouth: MOUTH_FRONT,
+    w: 24, h: 26, pivot: 13, eyes: EYES_FRONT, mouth: MOUTH_FRONT,
     rows: [
       ...HEAD,
       '......BFFBBBBBBFFB......',
@@ -340,7 +344,9 @@
     return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
   }
 
-  // auto-outline: transparent cells 4-adjacent to a solid (non-whisker) cell
+  // auto-outline: transparent cells 4-adjacent to a solid (non-whisker) cell.
+  // Sticker frames (frame.rim) count baked 'w' lines and whiskers as solid,
+  // so the ring wraps the whole drawing like a die-cut sticker.
   const outlineCache = new WeakMap();
   function getOutline(frame) {
     let pts = outlineCache.get(frame);
@@ -350,7 +356,8 @@
     const solid = (x, y) => {
       if (x < 0 || y < 0 || y >= rows.length || x >= w) return false;
       const ch = rows[y][x];
-      return ch !== '.' && ch !== 'w' && REGION_OF[ch] != null;
+      if (ch === 'w') return !!frame.rim;
+      return ch !== '.' && REGION_OF[ch] != null;
     };
     for (let y = -1; y <= rows.length; y++) {
       for (let x = -1; x <= w; x++) {
@@ -389,13 +396,22 @@
   function drawCat(ctx, frame, skin, px, ox, oy, opts = {}) {
     const { rows, w } = frame;
     const X = (x) => ox + (opts.flip ? w - 1 - x : x) * px;
-    // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top
-    const SH = (y) => (opts.tilt ? Math.round(opts.tilt * (rows.length - 1 - y) / 8) * px : 0);
+    // curious lean (opts.tilt ±1): rows shear sideways, strongest at the top.
+    // drag swing (opts.swing, in art cells): rows below frame.pivot shear
+    // like a pendulum, strongest at the bottom — the head stays put
+    const SH = (y) => {
+      let s = opts.tilt ? Math.round(opts.tilt * (rows.length - 1 - y) / 8) * px : 0;
+      if (opts.swing && frame.pivot != null && y > frame.pivot) {
+        // screen-pixel granularity, not art cells — the swing must be smooth
+        s += Math.round(opts.swing * (y - frame.pivot) / Math.max(1, rows.length - 1 - frame.pivot) * px);
+      }
+      return s;
+    };
     ctx.save();
     if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
 
-    // outline
-    ctx.fillStyle = skin.outline || CREAM;
+    // outline ring — sticker frames use the skin's rim color instead
+    ctx.fillStyle = (frame.rim && skin.rim) || skin.outline || CREAM;
     for (const [x, y] of getOutline(frame)) {
       ctx.fillRect(X(x) + SH(y), oy + y * px, px, px);
     }
@@ -416,6 +432,11 @@
           const pl = lum(skin.paws);
           color = hex3(mixRgb(hexToRgb(skin.paws), pl > 140 ? [0, 0, 0] : [255, 255, 255], pl > 140 ? 0.2 : 0.3));
         }
+        if (!color && region === 'tongue') color = '#d6a4a5'; // pink for all coats
+        if (!color && region === 'keycap') {
+          // caps must contrast with the key borders (the skin's line color)
+          color = lum(skin.outline || CREAM) < 130 ? '#fefefe' : '#35323e';
+        }
         if (!color) color = '#ff00ff';
         if (style !== 'plain' && STRIPEABLE[region]) {
           if (style === 'tabby' && (x + y * 2) % 6 < 2) color = patternColor;
@@ -426,9 +447,9 @@
       }
     }
 
-    // pixel-level overrides (face markings etc.) — only on 24-wide front
-    // frames where art coordinates line up; only recolors existing pixels
-    if (opts.overrides && w === 24) {
+    // pixel-level overrides (face markings etc.) — only on front frames
+    // where art coordinates line up; only recolors existing pixels
+    if (opts.overrides && (w === 24 || w === 30)) {
       for (const key in opts.overrides) {
         const [px2, py2] = key.split(',').map(Number);
         if (!(py2 >= 0 && py2 < rows.length)) continue;
@@ -476,8 +497,8 @@
         : Math.abs(lum(skin.pupil) - lum(skin.headL)) < 50 && size >= 5
           ? hex3(mixRgb(hexToRgb(skin.headL), [110, 116, 138], 0.45))
           : skin.pupil;
-      let pw = size >= 5 ? 3 : 2;            // pupil width
-      let ph = Math.min(pw, sh);             // pupil height
+      let pw = eyes.pw || (size >= 5 ? 3 : 2); // pupil width (frames may pin it)
+      let ph = eyes.ph || Math.min(pw, sh);    // pupil height
       if (eye.dilate) {                       // interest/affection: wider, rounder
         pw = Math.min(pw + 1, size - 1);
         ph = Math.min(ph + 1, sh);
@@ -554,237 +575,430 @@
   }
 
   // ------------------------------------------------- kawaii set (cute af)
-  // Same 24-wide grid + head bounds as classic, so pixel overrides and photo
-  // markings land identically. Bigger glint eyes, cheek bulge, bean body.
-  const KHEAD = [
-    '....LL............RR....',
-    '...LLLL..........RRRR...',
-    '...LiiL..........RiiR...',
-    '..LLLLLLLLLLRRRRRRRRRR..',
-    '.LLLLLLLLLLLRRRRRRRRRRR.',
-    '.LLLLLLLLLLLRRRRRRRRRRR.',
-    'wLLLLLLLLLLLRRRRRRRRRRRw',
-    '.LLLLLLLLLLLRRRRRRRRRRR.',
-    'wLLLLLLLLLLLRRRRRRRRRRRw',
-    '.LLLLLLLLLnnRRRRRRRRRRR.',
-    '..LLLLLLLMMMMRRRRRRRRR..',
-    '...LLLLLLMMMMRRRRRRRR...',
+  // 30-wide 3/4 side-sit transcribed cell-for-cell from a yarn-chart
+  // reference: white cat, gray markings (G), tail curled to her left. The
+  // chart's black interior lines + whiskers are baked as 'w' pixels, so the
+  // auto-outline stays quiet on these frames. Eyes/nose/mouth anchors sit
+  // where the chart drew them.
+  const K30 = (s) => (s + '.'.repeat(30)).slice(0, 30);
+  const KHEAD = [ // rows 0-13: ears through chin (tail lives in overlays)
+    K30('................ww.....ww'),
+    K30('...............wLw....wRw'),
+    K30('..............wLiw...wRiw'),
+    K30('.............wLiiwwwwwRiw'),
+    K30('.............wLiiwLLRRwiw'),
+    K30('............wLLLLLLLRRRww'),
+    K30('............wLLLLLLLRRRRRw'),
+    K30('...........wLLLLLLLLRRRRRw'),
+    K30('...........wLLLLLLLLRRRRRw'),
+    K30('...........wLLLLLLLLRRRRRRwww'),
+    K30('........wwwwLLLLLGLLRRRRGRw'),
+    K30('...........wLLLLLLLMMnMMRRwww'),
+    K30('........wwwwwLLLLLLMwMwMRRw'),
+    K30('.............wLLLLLMMMMMRw'),
   ];
-  const KEYES = { l: [3, 6], r: [16, 6], size: 5, h: 4 }; // low-set, baby schema
-  const KMOUTH = [11, 10];
+  const KNECK = [ // rows 14-15: chin bottom + neck shadow line
+    K30('..............wwCCCCCCCww'),
+    K30('..............wGwwwwwww'),
+  ];
+  const KSIT_BODY = [ // rows 16-25: collar, chest, legs, paws (tail base baked)
+    K30('............wwCCCGGGGGw'),
+    K30('...........wCCCCCCBBBBw'),
+    K30('..........wCCCCCCCBBBBw'),
+    K30('..........wCCCCCCwBBBBw'),
+    K30('.........wCCCCCCCCwBBGw'),
+    K30('....wGTTwwCCCCwCCCwGGww'),
+    K30('.....wGGGwFFFFGwFFwwwww'),
+    K30('......wwGwFFFFGwFFFwwGw'),
+    K30('........wwFFFFFGwFFwGGw'),
+    K30('..........wwwwwwwwwwwww'),
+  ];
+  const KSIT = [...KHEAD, ...KNECK, ...KSIT_BODY]; // 26 rows
+  // slim 1x3 chart eyes that can still glance sideways (gx 0..1)
+  const KEYES = { l: [17, 8], r: [22, 8], size: 2, h: 3, pw: 1, ph: 3 };
+  const KMOUTH = [20, 12];
 
-  // pusheen-style loaf: no neck, body continues the head
-  const KSIT_BODY = [
-    '..BBBBBBBBBBBBBBBBBBBB..',
-    '..BBBBBCCCCCCCCCCBBBBB..',
-    '..BBBBBCCCCCCCCCCBBBBB..',
-    '..BBBBBCCCCCCCCCCBBBBB..',
-    '..BBFFFBCCCCCCCCBFFFBB..',
-    '...FFFF..........FFFF...',
-  ];
-  const KBLANK = Array(18).fill('.'.repeat(24));
+  const KBLANK = Array(26).fill('.'.repeat(30));
   const KTAIL_REST = overlay(KBLANK, [
-    [11, '....................TTT.'],
-    [12, '...................TTTTT'],
-    [13, '...................TTtTT'],
-    [14, '...................TTTTT'],
-    [15, '....................TTT.'],
+    [13, K30('..www')],
+    [14, K30('.wtttw')],
+    [15, K30('.wtttw')],
+    [16, K30('.wTTTw')],
+    [17, K30('..wTTTw')],
+    [18, K30('..wTTTw')],
+    [19, K30('...wTTTw')],
+    [20, K30('...wTTTw')],
   ]);
   const KTAIL_MID = overlay(KBLANK, [
-    [10, '.....................TT.'],
-    [11, '....................TTTT'],
-    [12, '...................TTTTT'],
-    [13, '...................TTtT.'],
-    [14, '...................TTTT.'],
-    [15, '....................TT..'],
+    [11, K30('..www')],
+    [12, K30('.wtttw')],
+    [13, K30('.wtttw')],
+    [14, K30('.wTTTw')],
+    [15, K30('..wTTTw')],
+    [16, K30('..wTTTw')],
+    [17, K30('..wTTTw')],
+    [18, K30('...wTTTw')],
+    [19, K30('...wTTTw')],
+    [20, K30('....wTTTw')],
   ]);
   const KTAIL_UP = overlay(KBLANK, [
-    [8,  '.....................tt.'],
-    [9,  '....................TTTT'],
-    [10, '....................TTTT'],
-    [11, '....................TTT.'],
-    [12, '...................TTT..'],
-    [13, '...................TTT..'],
-    [14, '...................TT...'],
+    [8,  K30('..www')],
+    [9,  K30('.wtttw')],
+    [10, K30('.wtttw')],
+    [11, K30('.wTTTw')],
+    [12, K30('.wTTTw')],
+    [13, K30('..wTTTw')],
+    [14, K30('..wTTTw')],
+    [15, K30('...wTTTw')],
+    [16, K30('...wTTTw')],
+    [17, K30('...wTTTw')],
+    [18, K30('....wTTTw')],
+    [19, K30('....wTTTw')],
+    [20, K30('....wTTTw')],
   ]);
-  const KSIT = [...KHEAD, ...KSIT_BODY];
 
   const KFRAMES = {};
-  KFRAMES.sit = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_REST) };
-  KFRAMES.sit_tail_mid = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_MID) };
-  KFRAMES.sit_tail_up = { w: 24, h: 18, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_UP) };
+  KFRAMES.sit = { w: 30, h: 26, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_REST) };
+  KFRAMES.sit_tail_mid = { w: 30, h: 26, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_MID) };
+  KFRAMES.sit_tail_up = { w: 30, h: 26, eyes: KEYES, mouth: KMOUTH, rows: merge(KSIT, KTAIL_UP) };
+
+  // typing: she scoots up to a little two-key keyboard (its own sticker,
+  // separated by open air) — one arm reaches down with the paw landing on
+  // its keycap, which compresses; the other mitt stays raised. Frames are
+  // 5 rows taller than sit, so she visibly sits up to type.
   KFRAMES.knead_l = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(overlay(KSIT, [
-      [16, '..BBFFFCCCCCCCCCCFFFB...'],
-      [17, '....BBFF.........FFFF...'],
-    ]), KTAIL_REST),
+    w: 30, h: 28, eyes: KEYES, mouth: KMOUTH,
+    rows: [
+      ...merge(overlay(KSIT, [
+        [19, K30('..........wCCCCCwFFFwBw')],
+        [20, K30('.........wCCCCCCwwwwwGw')],
+        [21, K30('....wGTTwwCwFFFwCC..wGw')],
+        [22, K30('.....wGGGwCwFFFwCCCwGGw')],
+        [23, K30('......wwGwCwFFFwCC..www')],
+        [24, K30('........wwCwFFFwwwwKKKw')],
+        [25, K30('...........wKKKKKwwKKKKKw')],
+      ]), KTAIL_REST),
+      K30('...........wGGGGGwwGGGGGw'),
+      K30('...........wwwwwwwwwwwwww'),
+    ],
   };
   KFRAMES.knead_r = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(overlay(KSIT, [
-      [16, '...BFFFCCCCCCCCCCFFFBB..'],
-      [17, '...FFFF.........FFBB....'],
-    ]), KTAIL_REST),
-  };
-  KFRAMES.loaf = {
-    w: 24, h: 17, eyes: KEYES, mouth: KMOUTH,
+    w: 30, h: 28, eyes: KEYES, mouth: KMOUTH,
     rows: [
-      ...KHEAD,
-      '..BBBBBBBBBBBBBBBBBBBB..',
-      '..BBBBBBBBBBBBBBBBBBBB..',
-      '..BBBBBBBBBBBBBBBBBBBB..',
-      '.TTTTTBBBBBBBBBBBBBBBB..',
-      '.tttTTTT................',
+      ...merge(overlay(KSIT, [
+        [19, K30('.........wFFFwCCCCCwBBw')],
+        [20, K30('.........wwwwwCCCCCCwGw')],
+        [21, K30('....wGTTww...CCCCCwFFFw')],
+        [22, K30('.....wGGGwCCCCCCCwwFFFw')],
+        [23, K30('......wwGwC..www..wFFFw')],
+        [24, K30('........wwC.wKKKw.wFFFww')],
+        [25, K30('...........wKKKKKwwFFFKKw')],
+      ]), KTAIL_REST),
+      K30('...........wGGGGGwwGGGGGw'),
+      K30('...........wwwwwwwwwwwwww'),
     ],
-  };
-  KFRAMES.hang = {
-    w: 24, h: 24, eyes: KEYES, mouth: KMOUTH,
-    rows: [
-      ...KHEAD,
-      '......BFFBBBBBBFFB......',
-      '......BFFBCCCCBFFB......',
-      '.......BBCCCCCCBB..T....',
-      '.......BBCCCCCCBB..T....',
-      '.......BBCCCCCCBB.T.....',
-      '.......BBBCCCCBBBT......',
-      '........BBBBBBBBt.......',
-      '........FF...FF.........',
-      '........FF...FF.........',
-      '........................',
-      '........................',
-      '........................',
-    ],
-  };
-  KFRAMES.celebrate = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: [
-      ...KHEAD,
-      '..BBBBBBBBBBBBBBBBB.tt..',
-      '..BBBBBCCCCCCCCCCBB.tt..',
-      '..BBBBBCCCCCCCCCCBBTT...',
-      '..BBBBBCCCCCCCCCCBTT....',
-      '...BFFFBCCCCCCCCBFFFB...',
-      '........................',
-    ],
-  };
-  {
-    const pad2k = (r) => '..' + r + '..';
-    const rows = [];
-    rows.push('.FF......................FF.');
-    rows.push('.FF......................FF.');
-    rows.push('.BB......................BB.');
-    rows.push('.BB.' + KHEAD[0].slice(2, 22) + '.BB.');
-    rows.push('.BB.' + KHEAD[1].slice(2, 22) + '.BB.');
-    rows.push('.BB.' + KHEAD[2].slice(2, 22) + '.BB.');
-    rows.push('.BB.' + KHEAD[3].slice(2, 22) + '.BB.');
-    for (let i = 4; i < KHEAD.length; i++) rows.push(pad2k(KHEAD[i]));
-    rows.push('.BBBBBBBBBBBBBBBBBBBBBBBBBB.');
-    rows.push(pad2k('.....BBBCCCCCCCCCCBB....'));
-    rows.push(pad2k('.....BBBCCCCCCCCCCBB.t..'));
-    rows.push(pad2k('.....BBBCCCCCCCCCCBB.T..'));
-    rows.push(pad2k('.....BBBCCCCCCCCCCBBTT..'));
-    rows.push(pad2k('......BBBBBBBBBBBB......'));
-    rows.push(pad2k('......BFFB....BFFB......'));
-    KFRAMES.stretch_up = {
-      w: 28, h: rows.length, eyes: { l: [5, 9], r: [18, 9], size: 5, h: 4 }, mouth: [13, 13],
-      rows,
-    };
-  }
-  // folded-ear rows shared by the idle ear-flick and the sleep dream-twitch
-  const KFLICK_EARS = [
-    '..................RR....',
-    '...LLL...........RRRR...',
-    '...LiiLL.........RiiR...',
-  ];
-  KFRAMES.sit_flick = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: merge([...KFLICK_EARS, ...KSIT.slice(3)], KTAIL_REST),
-  };
-  KFRAMES.loaf_twitch = {
-    w: 24, h: 17, eyes: KEYES, mouth: KMOUTH,
-    rows: [...KFLICK_EARS, ...KFRAMES.loaf.rows.slice(3)],
   };
 
-  // grooming: right front paw lifts off the ground (P = shaded raised paw) —
-  // groom1 licks it at the mouth, groom2 wipes it over the ear
-  const KGROOM_BASE = overlay(KSIT, [
-    [16, '..BBFFFBCCCCCCCCBBBBBB..'],
-    [17, '...FFFF.................'],
-  ]);
+  // loaf for sleeping: head on a low blob, tail wrapped around the front
+  KFRAMES.loaf = {
+    w: 30, h: 20, eyes: KEYES, mouth: KMOUTH,
+    rows: [
+      ...KHEAD,
+      K30('..............wwCCCCCCCww'),
+      K30('........wwwwwwCCCGGGGGw'),
+      K30('.......wBBCCCCCCCBBBBGw'),
+      K30('......wBBBCCCCCCCBBBBGw'),
+      K30('.....wTTTTBBBBBBBBBBBGw'),
+      K30('.....wtttTTTwwwwwwwwwww'),
+    ],
+  };
+
+  // dragged / hanging: transcribed cell-for-cell from the dangling chart in
+  // pixel-cat-images/sprites.json — held by the scruff, forelegs hanging,
+  // long torso, tail curling below. Eyes stay live (same slim chart eyes).
+  KFRAMES.hang = {
+    w: 21, h: 40, pivot: 15, // body below the neck row swings while dragged
+    eyes: { l: [8, 7], r: [13, 7], size: 2, h: 3, pw: 1, ph: 3 },
+    mouth: [11, 11],
+    rows: [
+      '.......ww......ww....',
+      '......wLw.....wRw....',
+      '......wiw....wRiw....',
+      '.....wLiwwwwwwRiw....',
+      '.....wLiwLLLRRwiw....',
+      '....wLLLLLLLRRRwww...',
+      '....wLLLLLLLRRRRRw...',
+      '...wLLLLLLLLRRRRRw...',
+      '...wLLLLLLLLRRRRRw...',
+      '...wLLLLGLLLRRRGRRwww',
+      'wwwwLLLLLLMMnMMRRRw..',
+      '...wLLLLLLMwMwMRRRwww',
+      'wwwwwLLLLLMMMMMRRw...',
+      '.....wLLLLLLRRRRRw...',
+      '......wwLLLLRRRww....',
+      '......wGwwwwwwww.....',
+      '......wCCGGGGCCw.....',
+      '.....wFFCGCCCFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wFFwCCCwFFw.....',
+      '.....wGFwCCCwFGw.....',
+      '......wGwCCCwGGw.....',
+      '.......wCCCCCww......',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wCCCCCCCCw.....',
+      '......wGBBwwBBBw.....',
+      '......wGBwBwwBGw.....',
+      '.......wGwBwwGw......',
+      '........wwBwwGw......',
+      '..........ww.w.......',
+      '.........wTw.........',
+      '........wTTw.........',
+      '......wwTTGw.........',
+      '.....wTTTGw..........',
+      '.....wTTGww..........',
+      '.....wGGw............',
+      '......ww.............',
+    ],
+  };
+
+  // celebrate: airborne happy hop — feet tucked, tail flung up
+  KFRAMES.celebrate = {
+    w: 30, h: 24, eyes: KEYES, mouth: KMOUTH,
+    rows: merge([
+      ...KSIT.slice(0, 22),
+      K30('......wwGwFFFFFFFFwGGw'),
+      K30('........wwwwwwwwwwwww'),
+    ], KTAIL_UP),
+  };
+
+  // the big stretch: a play-bow transcribed cell-for-cell from the
+  // pixel_cat_stretching.py chart — butt up, tail hooked over the back,
+  // chest low, front legs reaching. The face is baked into the art
+  // (eyes: {} disables the live face for this two-second pose).
+  KFRAMES.stretch_up = {
+    w: 32, h: 31, eyes: {}, mouth: null, side: true,
+    rows: [
+      '........wwww....................',
+      '.......wttttww..................',
+      '......wtttttGw..................',
+      '......wttwwGww..................',
+      '.....wTTw..ww...................',
+      '.....wTTw.......................',
+      '.....wTDw.......................',
+      '.....wGGw.......................',
+      '.....wGGGwwww...................',
+      '......wwBBBBBw..................',
+      '.....wBBBBBBBBw.................',
+      '....wBBBBBBBBBw.................',
+      '....wBBBBBBBBBBw................',
+      '....wBBBBBBBBBBw................',
+      '....wBBBBBBBBBBww......ww.......',
+      '....wBBBBBBBBBwGww....wGw.......',
+      '....wBBBBBBBBBwDGww..wDGw.......',
+      '....wBBwBBBBBBwDLDwwwwGRw.......',
+      '....wBBwBBBBBBwDwLLLLRRRw.......',
+      '....wBBwBBBBBBwwLLLLLRRRRw......',
+      '.....wBwGBBBBwBLLLLLLRRRRw......',
+      '.....wBGwBBBBwBLLwLLLRwRRw......',
+      '.....wBBwwBBwwwLLwLLLRwRRwww....',
+      '......wBwwGBBBwLGwLLwRwGRw......',
+      '......wBGwwBwwwLLLLwLwRRRwww....',
+      '.......www.wGFFwLLLLLRRRw.......',
+      '............wGFFLwwLLRRRRww.....',
+      '.............wDFFFFwwwwGFFFw....',
+      '..............wwDGFFFwDwwGFFw...',
+      '................wwwFFGw..wwww...',
+      '...................www..........',
+    ],
+  };
+
+  // folded-ear rows shared by the idle ear-flick and the sleep dream-twitch
+  const KFLICK_EARS = [
+    K30('................ww'),
+    K30('...............wLw...ww'),
+    K30('..............wLiw..wRRRw'),
+    K30('.............wLiiwwwwwRRw'),
+  ];
+  KFRAMES.sit_flick = {
+    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
+    rows: merge([...KFLICK_EARS, ...KSIT.slice(4)], KTAIL_REST),
+  };
+  KFRAMES.loaf_twitch = {
+    w: 30, h: 20, eyes: KEYES, mouth: KMOUTH,
+    rows: [...KFLICK_EARS, ...KFRAMES.loaf.rows.slice(4)],
+  };
+
+  // grooming: the two-frame lick cycle transcribed cell-for-cell from the
+  // licking/licking_in charts in pixel-cat-images/sprites.json — head nods
+  // one pixel onto the raised paw, pink tongue out, then back at rest.
+  // Faces are baked (blissful closed eyes), registered on a shared canvas.
   KFRAMES.sit_groom1 = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
-      [8,  '.............ww.........'],
-      [9,  '............wPPw........'],
-      [10, '............wPPPw.......'],
-      [11, '............wPPP........'],
-      [12, '.............wPP........'],
-      [13, '.............wPP........'],
-      [14, '.............wPP........'],
-      [15, '.............wPP........'],
-    ])), KTAIL_REST),
+    w: 29, h: 27, eyes: {}, mouth: null,
+    rows: [
+      '.............................',
+      '.................ww.....ww...',
+      '................wLw....wRw...',
+      '...............wLiw...wRiw...',
+      '..............wLiiwwwwwRiw...',
+      '..............wLiiwRRRRwiw...',
+      '.............wLLLLLRRRRRww...',
+      '.............wLLLLLRRRRRRRw..',
+      '............wLLLLLLRRRRRRRw..',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLwwwMMwwwMwww',
+      '........wwwwLLLLLGMMMMMMGMw..',
+      '...........wLLLLLMMMMwMFFFwww',
+      '........wwwwLLLLLMMMwMwFFww..',
+      '............wwLLLMMMMppFww...',
+      '.wwww........wwwLMMMMpMFG....',
+      'wttttw........wGwwwwwwBFFw...',
+      'wttttw......wwCCCGGGGGwFFw...',
+      'wTTTTw.....wCCCCCBBBBBwGGw...',
+      '.wTTTTw...wCCCCCCBBBBBwww....',
+      '.wTTTTww..wCCCCCCBBwBBw......',
+      '..wTTTTwwwCCCCCCCBwBBBw......',
+      '..wTTTTTTwFFFFwFFwBBBBw......',
+      '...wwGTTTwFFFFGwFwwwBBw......',
+      '.....wGGGwFFFFGwwFBBwBw......',
+      '......wwGwFFFFFGwFGGwBw......',
+      '........wwwwwwwwwwwwwww......',
+    ],
   };
   KFRAMES.sit_groom2 = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
-    rows: merge(merge(KGROOM_BASE, overlay(KBLANK, [
-      [2,  '.................PP.....'],
-      [3,  '................wPPP....'],
-      [4,  '.................wPP....'],
-      [5,  '..................wPP...'],
-      [6,  '..................wPP...'],
-      [7,  '..................wPP...'],
-      [8,  '..................wPP...'],
-      [9,  '..................wPP...'],
-      [10, '..................wPP...'],
-      [11, '.................wPP....'],
-      [12, '.................wPP....'],
-      [13, '.................wPP....'],
-      [14, '.................wPP....'],
-      [15, '.................wPP....'],
-    ])), KTAIL_REST),
+    w: 29, h: 27, eyes: {}, mouth: null,
+    rows: [
+      '................ww.....ww....',
+      '...............wLw....wRw....',
+      '..............wLiw...wRiw....',
+      '.............wLiiwwwwwRiw....',
+      '.............wLiiwLRRRwiw....',
+      '............wLLLLLLRRRRww....',
+      '............wLLLLLLRRRRRRw...',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLLLRRRRRRw...',
+      '...........wLLLLLwwwRRwwwRwww',
+      '........wwwwLLLLLGMMMMMMGMw..',
+      '...........wLLLLLMMMMwMMMMwww',
+      '........wwwwLLLLLMMMwMwFFFw..',
+      '............wLLLLMMMMMMFFw...',
+      '.............wLLLMMMMMMFww...',
+      '.wwww.........wwLMMMMMMFG....',
+      'wttttw........wGwwwwwwBFFw...',
+      'wttttw......wwCCCGGGGGwFFw...',
+      'wTTTTw.....wCCCCCBBBBBwGGw...',
+      '.wTTTTw...wCCCCCCBBBBBwww....',
+      '.wTTTTww..wCCCCCCBBwBBw......',
+      '..wTTTTwwwCCCCCCCBwBBBw......',
+      '..wTTTTTTwFFFFwFFwBBBBw......',
+      '...wwGTTTwFFFFGwFwwwBBw......',
+      '.....wGGGwFFFFGwwFBBwBw......',
+      '......wwGwFFFFFGwFGGwBw......',
+      '........wwwwwwwwwwwwwww......',
+    ],
   };
 
   // contentment: tail sweeps around the front and rests over the paws
   const KTAIL_WRAP = overlay(KBLANK, [
-    [11, '....................TT..'],
-    [12, '...................TTT..'],
-    [13, '...................TTT..'],
-    [14, '..................TTTT..'],
-    [15, '..............TTTTTT....'],
-    [16, '...........TTTTTT.......'],
-    [17, '.........TTTtt..........'],
+    [22, K30('.....wTTTw')],
+    [23, K30('......wTTTTTTTTTttw')],
+    [24, K30('........wwTTTTTTtttw')],
   ]);
   KFRAMES.sit_wrap = {
-    w: 24, h: 18, eyes: KEYES, mouth: KMOUTH,
+    w: 30, h: 26, eyes: KEYES, mouth: KMOUTH,
     rows: merge(KSIT, KTAIL_WRAP),
   };
 
-  // pounce wind-up: hunkered low (two body rows shorter), tail mid-air;
-  // the renderer adds the butt-wiggle oscillation
-  const KCROUCH_TAIL = overlay(Array(16).fill('.'.repeat(24)), [
-    [8,  '.....................TT.'],
-    [9,  '....................TTTT'],
-    [10, '...................TTTTT'],
-    [11, '...................TTtT.'],
-    [12, '...................TTTT.'],
-    [13, '....................TT..'],
-  ]);
+  // pounce wind-up: hunkered low, tail mid-air; the renderer adds the
+  // butt-wiggle oscillation
   KFRAMES.crouch = {
-    w: 24, h: 16, eyes: KEYES, mouth: KMOUTH,
+    w: 30, h: 19, eyes: KEYES, mouth: KMOUTH,
     rows: merge([
       ...KHEAD,
-      '..BBBBBBBBBBBBBBBBBBBB..',
-      '..BBBBBCCCCCCCCCCBBBBB..',
-      '..BBFFFBCCCCCCCCBFFFBB..',
-      '...FFFF..........FFFF...',
-    ], KCROUCH_TAIL),
+      K30('..............wwCCCCCCCww'),
+      K30('.........wwwwwCCCGGGGGw'),
+      K30('........wCCCCCCCCCwBBGw'),
+      K30('........wwFFFFFwFFFwGGw'),
+      K30('.........wwwwwwwwwwwwww'),
+    ], overlay(Array(19).fill('.'.repeat(30)), [
+      [10, K30('..www')],
+      [11, K30('.wtttw')],
+      [12, K30('.wtttw')],
+      [13, K30('.wTTTw')],
+      [14, K30('..wTTTw')],
+      [15, K30('..wTTTw')],
+      [16, K30('...wTTTww')],
+    ])),
   };
 
-  // side-view action frames shared with classic (they read well at speed)
-  KFRAMES.run_a = FRAMES.run_a;
-  KFRAMES.run_b = FRAMES.run_b;
-  KFRAMES.leap = FRAMES.leap;
+  // run cycle transcribed cell-for-cell from the harmonized run_extended /
+  // run_crossing charts in pixel-cat-images/sprites.json (mirrored to face
+  // right, like the engine expects) — full stride and mid-gather, striped
+  // tail, baked faces since these alternate every ~80ms. The pair shares a
+  // face-aligned canvas, so the extended stride rides airborne while the
+  // gather touches down: the gallop bob is in the art.
+  KFRAMES.run_a = {
+    w: 30, h: 22, eyes: {}, mouth: null, side: true,
+    rows: [
+      '...............ww.....ww......',
+      '...............wLw....wRw.....',
+      '...............wiLw...wiw.....',
+      '....ww.........wiLwwwwwiRw....',
+      '...wttw........wiwLLLRwiRw....',
+      '...wttw.......wwwLLLLRRRRRw...',
+      '....wttw......wLLLLLLRRRRRw...',
+      '....wGww......wLLLLLLRRRRRRw..',
+      '....wwTw......wLLLwLLRRwRRRw..',
+      '....wTTww....wLLLLwLLRRwRRRw..',
+      '.....wwGw..wwwLLLGwLLRRwGRRRww',
+      '......wwGw...wLLLLLLLwRRRRRRw.',
+      '.......wwGwwwLwLLLLLwRwRRRRw..',
+      '........wwwBBLLwLLLLLRRRRRw...',
+      '.........wBBBLLLwLLLLRRRRw....',
+      '........wwFFFFFFFwwwwwwwww....',
+      '......w..wwFFGFFFGFFFww...ww..',
+      '........wFFwwwGGGwwwFFFwG...G.',
+      '........wFw.........wFFw..w...',
+      '.........w...........ww.......',
+      '..............................',
+      '..............................',
+    ],
+  };
+  KFRAMES.run_b = {
+    w: 30, h: 22, eyes: {}, mouth: null, side: true,
+    rows: [
+      '..............................',
+      '..............................',
+      '...............ww......ww.....',
+      '...............wLw.....wRw....',
+      'wwww...........wiLwwwwwwiRw...',
+      'wtttw..........wGwLLLRRwGRw...',
+      '.wtww.........wwwLLLLRRRRRRw..',
+      '.wwTw.........wLLLLLLRRRRRRw..',
+      '.wTww.........wLLLwLLRRwRRRRw.',
+      '.www........wwLLLLwLLRRwRRRRw.',
+      '.wTTw........wLLLGwLLRRwGRRRww',
+      '..Gwww......wwLLLLLLLwRRRRRRw.',
+      '..wwwTwwwwwwBLwLLLLLwRwRRRRRww',
+      '...wwGGwwTTBBLwGLLLLLRRRRRRw..',
+      '....wwwwBBBBBLLwwLLLLRRRRRw...',
+      '.......wFFFFFFFFwwwwwwwwww....',
+      '.......wFFFFFFFFFwGGGGw.......',
+      '........wFFGGFwFFFwwFw........',
+      '.........wGwGwwGGFFFw.........',
+      '..........wGFFwGGwFFw.........',
+      '...........wGFFwwGww..........',
+      '.............GGw..w...........',
+    ],
+  };
+  // leap still borrowed from classic (cloned so the sticker rim below
+  // doesn't leak into the classic set's outline cache)
+  KFRAMES.leap = { ...FRAMES.leap };
+
+  // every kawaii frame is a die-cut sticker: white rim around the whole cat
+  for (const id in KFRAMES) KFRAMES[id].rim = true;
 
   const SPRITE_SETS = { kawaii: KFRAMES, classic: FRAMES };
   function framesFor(style) {

@@ -50,9 +50,9 @@
     const idleFrames = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
     frameIdx = (frameIdx + 1) % idleFrames.length;
     const blink = Math.random() < 0.12;
-    drawCatOn(prevCanvas, currentSkin(), idleFrames[frameIdx], 8, blink);
+    drawCatOn(prevCanvas, currentSkin(), idleFrames[frameIdx], 7, blink);
   }, 480);
-  drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 8, false);
+  drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
 
   // ------------------------------------------------------------------- cat
   $('name').value = settings.name || '';
@@ -68,7 +68,7 @@
       settings.spriteStyle = b.dataset.v;
       FRAMES = framesFor(settings.spriteStyle);
       save({ spriteStyle: b.dataset.v });
-      drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 8, false);
+      drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
       drawEditor();
       renderPresets();
     });
@@ -225,6 +225,10 @@
   function overrides() { return settings.pixelOverrides || {}; }
 
   function drawEditor() {
+    // canvas tracks the current frame's grid (kawaii is 30-wide, classic 24)
+    const ew = FRAMES.sit.w * PIX, eh = FRAMES.sit.h * PIX;
+    if (editCanvas.width !== ew) editCanvas.width = ew;
+    if (editCanvas.height !== eh) editCanvas.height = eh;
     editCtx.clearRect(0, 0, editCanvas.width, editCanvas.height);
     editCtx.imageSmoothingEnabled = false;
     // checker backdrop for transparent cells
@@ -261,7 +265,7 @@
     settings.pixelOverrides = ov;
     save({ pixelOverrides: ov });
     drawEditor();
-    drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 8, false);
+    drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
   }
 
   let painting = false;
@@ -292,7 +296,7 @@
     settings.pixelOverrides = null;
     save({ pixelOverrides: null });
     drawEditor();
-    drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 8, false);
+    drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
   });
   renderBrushes();
   drawEditor();
