@@ -6,7 +6,7 @@ anatomy is ASCII art in `renderer/sprites.js`.
 
 ## Before claiming anything is done
 
-- `npm test` must pass (85 scenarios; the count grows — keep it green, run it
+- `npm test` must pass (89 scenarios; the count grows — keep it green, run it
   twice if you touched timing). It boots a real Electron instance in an
   isolated per-PID profile, so it's safe while the user's cat is running.
 - `node --check` every file you edit. No linter is configured; match the
@@ -29,15 +29,27 @@ anatomy is ASCII art in `renderer/sprites.js`.
 
 ## Sprite rules
 
-- Frames are ASCII rows; after any sprite edit run the validator pattern
-  (every row length === `w`, `rows.length === h`, chars in `REGION_OF`) and
-  `npm run preview`, then actually look at the contact sheet.
+- Her looks are **packs** (see `docs/SPRITES.md` for the contract): built-ins
+  `sticker` (default) / `classic` / `kawaii` register inside
+  `renderer/sprites.js`; user packs are pure-data JSON in the profile's
+  `sprite-packs/` dir. **Packs are data, never code** — everything passes
+  `lib/validatePack.js` before it reaches a renderer; keep that the single
+  source of truth for pack rules.
+- After any sprite edit run `node tools/preview.js /tmp/sheet.png plain
+  <packId|path/to/pack.json>` and actually look at the contact sheet
+  (`npm run preview` renders the default pack).
+- The state machine requests poses through `RESOLVED` (cat.js): action poses
+  fall back toward `sit`, ritual poses (`sit_groom*`, `sit_flick`,
+  `sit_wrap`, `loaf_twitch`) are existence-gated — never fake a ritual on a
+  static pose. Only `sit` (with live eyes) is required of a pack.
 - Pixel art belongs to the cat and her paper speech surfaces only. Functional
   UI (menu, panels, settings) is modern system-ui. Fur must never tint red
   (a canvas-scan regression test enforces this).
 - `site/vendor/` holds verbatim copies of `renderer/sprites.js` and
   `renderer/gifts.js`; refresh with
   `cp renderer/sprites.js renderer/gifts.js site/vendor/` after sprite edits.
+- Painted pixels (`pixelOverrides`) are keyed **per pack id**; the editor
+  writes only the active pack's slice.
 
 ## Product principles (binding for any UX change)
 

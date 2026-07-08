@@ -168,6 +168,7 @@ per process, so the restart matters.
 | Reminders | meow at a time, pinned note above her head |
 | Agents | status LED, celebrations, question relay, typed answers |
 | Customization | name, fur styles, photo-matched skin, pixel marking editor |
+| Sprite packs | three built-in looks + your own as pure JSON ([authoring guide](docs/SPRITES.md)) |
 | Hide/show | she leaves a note telling you how to call her back |
 
 ¹ needs the Accessibility permission.
