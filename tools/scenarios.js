@@ -1488,13 +1488,15 @@ async function runScenarios(ctx) {
   await scenario('store: v4 settings migrate to packs, paint intact', async () => {
     const os = require('os');
     const { Store } = require('../lib/store');
-    const mk = (obj) => { const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'miru-mig-')); fs.writeFileSync(path.join(d2, 'settings.json'), JSON.stringify(obj)); return d2; };
+    const made = [];
+    const mk = (obj) => { const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'miru-mig-')); made.push(d2); fs.writeFileSync(path.join(d2, 'settings.json'), JSON.stringify(obj)); return d2; };
     const s = new Store(mk({ version: 4, spriteStyle: 'kawaii', skin: 'orange', pixelOverrides: { '10,9': '#ffffff' }, scale: 3 })).get();
     assert(s.version === 5 && s.spritePack === 'sticker', 'kawaii user lands on sticker v5');
     assert(s.pixelOverrides.classic['10,9'] === '#ffffff' && s.pixelOverrides.sticker['10,9'] === '#ffffff', 'flat paint kept under both grids');
     assert(s.skin === 'orange' && s.scale === 3, 'unrelated settings survive');
     const s2 = new Store(mk({ version: 1, spriteStyle: 'classic' })).get();
     assert(s2.spritePack === 'classic', 'classic stays classic');
+    for (const d2 of made) fs.rmSync(d2, { recursive: true, force: true });
   });
 
   await scenario('pixel paint: each pack keeps its own markings', async () => {

@@ -1312,7 +1312,7 @@
   const stickerPack = registerPack({
     meta: { id: 'sticker', name: 'Sticker', author: 'nishanth-augustai', freckles: true },
     frames: KFRAMES,
-    anims: { giftPresent: { frame: 'stretch_up', sparkle: true } },
+    anims: { giftPresent: { frame: 'stretch_up' } },
   });
   const classicPack = registerPack({
     meta: { id: 'classic', name: 'Classic', author: 'miru', freckles: false },

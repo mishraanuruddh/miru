@@ -40,7 +40,7 @@
 
   // ---------------------------------------------------------------- helpers
   function currentSkin() {
-    return Sprites.resolveSkin(null, settings.skin, settings.customColors);
+    return Sprites.resolveSkin(PACK, settings.skin, settings.customColors);
   }
 
   function drawCatOn(canvas, skin, frame, px, blink, withOverrides = true) {
@@ -61,7 +61,10 @@
   const prevCanvas = $('preview');
   let frameIdx = 0;
   setInterval(() => {
-    const idleFrames = [FRAMES.sit, FRAMES.sit_tail_mid, FRAMES.sit_tail_up, FRAMES.sit_tail_mid];
+    // sit-only packs are legal; missing tail frames fall back to sit
+    const mid = FRAMES.sit_tail_mid || FRAMES.sit;
+    const up = FRAMES.sit_tail_up || mid;
+    const idleFrames = [FRAMES.sit, mid, up, mid];
     frameIdx = (frameIdx + 1) % idleFrames.length;
     const blink = Math.random() < 0.12;
     drawCatOn(prevCanvas, currentSkin(), idleFrames[frameIdx], 7, blink);
@@ -137,7 +140,7 @@
     settings.skin = 'custom';
     settings.customColors = skin;
     save({ skin: 'custom', customColors: skin });
-    ovSave(ov || {});
+    if (FRAMES.sit.w === 24) ovSave(ov || {});
     renderPresets();
     refreshColors();
     renderSwatches(clusters, skin.body);
@@ -700,7 +703,17 @@ curl -X POST http://127.0.0.1:${port}/agent \\
   $('openAtLogin').addEventListener('change', () => save({ openAtLogin: $('openAtLogin').checked }));
   $('comnyangLink').addEventListener('click', (e) => e.preventDefault());
 
-  miru.onSettings((s) => { settings = s; });
+  miru.onSettings((s) => {
+    settings = s;
+    // a pack change from outside this window (tests, future surfaces) must
+    // not leave the picker/editor on the old grid
+    if (!getPack(settings.spritePack) || getPack(settings.spritePack) !== PACK) {
+      applyPack();
+      renderLookSeg();
+      drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
+      drawEditor();
+    }
+  });
 
   window.__settingsReady = true;
 })();

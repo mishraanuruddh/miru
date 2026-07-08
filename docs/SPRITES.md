@@ -28,7 +28,7 @@ errors shown there and in `GET /status`.
   "regionDefaults": { "scarf": "#c94f4f" },
   "palettes": { "black": { "scarf": "#e0b03a" } },
   "cycles": { "groom": 500 },
-  "anims": { "giftPresent": { "frame": "stretch_up", "sparkle": true } },
+  "anims": { "giftPresent": { "frame": "stretch_up" } },
   "frames": { "sit": { "w": 16, "h": 12, "eyes": { "l": [3, 4], "r": [11, 4], "size": 2, "h": 2 }, "mouth": [7, 7], "rows": ["..."] } }
 }
 ```
@@ -100,9 +100,11 @@ frames that share `sit`'s width and aren't `side` views.
 ## Limits and validation
 
 Frames ≤ 48×48, ≤ 64 frames per pack, `pack.json` ≤ 512 KB, colors must be
-hex (`#rgb`–`#rrggbbaa`). `lib/validatePack.js` is the single source of truth
-and runs before a pack ever reaches the renderer. After editing art, run
-`npm run preview <pack-id>` and actually look at the contact sheet.
+hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`). `lib/validatePack.js` is the
+single source of truth and runs before a pack ever reaches the renderer.
+After editing art, run
+`node tools/preview.js /tmp/sheet.png plain <packId|path/to/pack.json>`
+and actually look at the contact sheet.
 
 One soft note: the window-level drag/hunt geometry assumes her body center is
 roughly 70px above the window bottom (`CAT_ANCHOR_Y`, main.js). Very tall sit
