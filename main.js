@@ -9,6 +9,7 @@ const os = require('os');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const { Store } = require('./lib/store');
+const { validatePack } = require('./lib/validatePack');
 const { buildTrayIcon } = require('./lib/trayIcon');
 const claudeHooks = require('./lib/claudeHooks');
 const codexHooks = require('./lib/codexHooks');
@@ -640,6 +641,8 @@ function startAgentServer() {
             agent: a.label, showing: a.showing, ageSec: Math.round((Date.now() - a.t0) / 1000),
           })),
           inboxCount: inbox.length,
+          packs: ['sticker', 'classic', 'kawaii', ...userPacks.map((p) => p.meta.id)],
+          packErrors,
           pomodoro: pom.phase === 'off' ? null : { phase: pom.phase, remaining: pom.remaining, paused: pom.paused },
           voice: { phase: voice.phase, availability: brain.availability(), usage: voiceUsageRoll() },
           windDownDay: bond().windDownDay || null,
@@ -2105,8 +2108,54 @@ function resetPosition() {
   updateTray();
 }
 
+// ---------------------------------------------- sprite packs (user data)
+// Packs are pure-data JSON in the user's profile; each directory under
+// sprite-packs/ is one pack, its name is the pack id. Everything is
+// validated (lib/validatePack) before it may reach a renderer.
+let userPacks = [];
+let packErrors = [];
+function packsDir() { return path.join(app.getPath('userData'), 'sprite-packs'); }
+function loadUserPacks() {
+  userPacks = [];
+  packErrors = [];
+  let entries = [];
+  try { entries = fs.readdirSync(packsDir(), { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const file = path.join(packsDir(), e.name, 'pack.json');
+    try {
+      if (fs.statSync(file).size > 512 * 1024) {
+        packErrors.push({ id: e.name, error: 'pack.json is over 512KB' });
+        continue;
+      }
+      const { pack, errors } = validatePack(e.name, JSON.parse(fs.readFileSync(file, 'utf8')));
+      if (pack) userPacks.push(pack);
+      else packErrors.push({ id: e.name, error: errors.join('; ') });
+    } catch (err) {
+      if (err.code !== 'ENOENT') packErrors.push({ id: e.name, error: err.message });
+    }
+  }
+}
+function packsPayload() { return { packs: userPacks, errors: packErrors }; }
+function sendPacks() {
+  send('packs', packsPayload());
+  sendSettingsWin('packs', packsPayload());
+}
+
 // -------------------------------------------------------------------- ipc
 function setupIpc() {
+  ipcMain.handle('packs:get', () => packsPayload());
+  ipcMain.handle('packs:reload', () => {
+    loadUserPacks();
+    sendPacks();
+    return packsPayload();
+  });
+  ipcMain.on('packs:open-folder', () => {
+    try {
+      fs.mkdirSync(packsDir(), { recursive: true });
+      shell.openPath(packsDir());
+    } catch (err) { console.error('[packs]', err.message); }
+  });
   ipcMain.handle('settings:get', () => store.get());
   ipcMain.handle('settings:set', (e, partial) => {
     store.set(partial);
@@ -2196,6 +2245,7 @@ function setupIpc() {
 app.whenReady().then(() => {
   store = new Store(app.getPath('userData'));
   inbox.push(...(store.get().inboxLog || []).slice(0, 30)); // survive restarts
+  loadUserPacks(); // before any window: renderers ask for packs at boot
   if (process.platform === 'darwin' && !HARNESS) app.dock.hide();
 
   setupIpc();
@@ -2239,6 +2289,8 @@ app.whenReady().then(() => {
             mouse: (ev) => catWin.webContents.sendInputEvent(ev),
             port: () => agentPort,
             askCalls,
+            userDataDir: app.getPath('userData'),
+            reloadPacks: () => { loadUserPacks(); sendPacks(); },
           });
         } catch (e) {
           console.error('TEST RUNNER CRASH:', e);

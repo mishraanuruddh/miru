@@ -24,8 +24,15 @@
 
   // ------------------------------------------------------------- settings
   let settings = await miru.getSettings();
+  Sprites.syncUserPacks(((await miru.getPacks()) || {}).packs || []);
   applyPack();
   let skin = resolveSkin();
+
+  miru.onPacks((data) => {
+    Sprites.syncUserPacks((data && data.packs) || []);
+    applyPack();
+    skin = resolveSkin();
+  });
 
   function resolveSkin() {
     return Sprites.resolveSkin(PACK, settings.skin, settings.customColors);

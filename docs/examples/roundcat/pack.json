@@ -1,0 +1,66 @@
+{
+  "meta": { "id": "roundcat", "name": "Round Cat", "author": "you", "version": "1.0", "freckles": false },
+  "regions": { "S": "scarf" },
+  "regionDefaults": { "scarf": "#c94f4f" },
+  "palettes": { "black": { "scarf": "#e0b03a" } },
+  "cycles": { "groom": 500 },
+  "frames": {
+    "sit": {
+      "w": 16, "h": 12,
+      "eyes": { "l": [3, 4], "r": [11, 4], "size": 2, "h": 2 },
+      "mouth": [7, 7],
+      "rows": [
+        "..LL........RR..",
+        ".LiiL......RiiR.",
+        ".LLLLLLLRRRRRRR.",
+        "LLLLLLLLRRRRRRRR",
+        "LLLLLLLLRRRRRRRR",
+        "wLLLLLLLRRRRRRRw",
+        "LLLLLLLnnRRRRRRR",
+        ".LLLLLMMMMRRRRR.",
+        ".SSSSSSSSSSSSSS.",
+        ".BBBCCCCCCCCBBB.",
+        ".BBBCCCCCCCCBBB.",
+        "..BFF......FFB.."
+      ]
+    },
+    "sit_tail_mid": {
+      "w": 16, "h": 12,
+      "eyes": { "l": [3, 4], "r": [11, 4], "size": 2, "h": 2 },
+      "mouth": [7, 7],
+      "rows": [
+        "..LL........RR..",
+        ".LiiL......RiiR.",
+        ".LLLLLLLRRRRRRR.",
+        "LLLLLLLLRRRRRRRR",
+        "LLLLLLLLRRRRRRRR",
+        "wLLLLLLLRRRRRRRw",
+        "LLLLLLLnnRRRRRRR",
+        ".LLLLLMMMMRRRRR.",
+        ".SSSSSSSSSSSSSST",
+        ".BBBCCCCCCCCBBBT",
+        ".BBBCCCCCCCCBBB.",
+        "..BFF......FFB.."
+      ]
+    },
+    "sit_tail_up": {
+      "w": 16, "h": 12,
+      "eyes": { "l": [3, 4], "r": [11, 4], "size": 2, "h": 2 },
+      "mouth": [7, 7],
+      "rows": [
+        "..LL........RR..",
+        ".LiiL......RiiR.",
+        ".LLLLLLLRRRRRRR.",
+        "LLLLLLLLRRRRRRRR",
+        "LLLLLLLLRRRRRRRt",
+        "wLLLLLLLRRRRRRRT",
+        "LLLLLLLnnRRRRRRT",
+        ".LLLLLMMMMRRRRRT",
+        ".SSSSSSSSSSSSSS.",
+        ".BBBCCCCCCCCBBB.",
+        ".BBBCCCCCCCCBBB.",
+        "..BFF......FFB.."
+      ]
+    }
+  }
+}

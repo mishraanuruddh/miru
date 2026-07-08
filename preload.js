@@ -15,6 +15,10 @@ contextBridge.exposeInMainWorld('miru', {
   setSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
   onSettings: on('settings'),
   appInfo: () => ipcRenderer.invoke('app:info'),
+  getPacks: () => ipcRenderer.invoke('packs:get'),
+  reloadPacks: () => ipcRenderer.invoke('packs:reload'),
+  openPacksFolder: () => ipcRenderer.send('packs:open-folder'),
+  onPacks: on('packs'),
 
   // cat renderer
   onTick: on('tick'),

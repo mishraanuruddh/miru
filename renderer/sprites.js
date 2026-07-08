@@ -1278,6 +1278,22 @@
   function getPack(id) { return PACKS[id] || null; }
   function listPacks() { return Object.keys(PACKS).map((id) => PACKS[id]); }
 
+  // user packs arrive from main (already validated); a reload registers the
+  // new set and drops any that vanished from disk — built-ins never leave
+  const USER_PACK_IDS = new Set();
+  function syncUserPacks(defs) {
+    for (const id of [...USER_PACK_IDS]) {
+      if (!defs.some((d) => d.meta && d.meta.id === id)) {
+        delete PACKS[id];
+        USER_PACK_IDS.delete(id);
+      }
+    }
+    for (const def of defs) {
+      registerPack(def);
+      USER_PACK_IDS.add(def.meta.id);
+    }
+  }
+
   // one place answers "what colors does this cat wear": preset or custom
   // base, with the pack's own region colors underneath — base regions always
   // win, pack palettes exist to color the pack's custom regions per skin
@@ -1317,7 +1333,7 @@
 
   const API = {
     FRAMES: classicPack.frames, KFRAMES: stickerPack.frames, SPRITE_SETS, framesFor,
-    PACKS, registerPack, getPack, listPacks, resolveSkin,
+    PACKS, registerPack, getPack, listPacks, syncUserPacks, resolveSkin,
     SKINS, REGION_OF, drawCat, drawFrame, hexToRgb, getOutline, autoInk,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;

@@ -4,6 +4,8 @@
   const { SKINS, drawCat, getPack, listPacks } = Sprites;
   const { skinFromImageData, paletteToSkin, capFaceOverrides } = CatPalette;
   let settings = await miru.getSettings();
+  const packs0 = (await miru.getPacks()) || {};
+  Sprites.syncUserPacks(packs0.packs || []);
   let PACK = getPack(settings.spritePack) || getPack('sticker');
   let FRAMES = PACK.frames;
   let info = await miru.appInfo();
@@ -94,6 +96,25 @@
     }
   }
   renderLookSeg();
+
+  // user packs: folder + reload live next to the picker; a broken pack is
+  // skipped and says why, never rendered as markup
+  function renderPackErrors(errors) {
+    $('packErrors').textContent = (errors || [])
+      .map((e) => `${e.id}: ${e.error}`).join(' · ');
+  }
+  renderPackErrors(packs0.errors);
+  $('packsFolder').addEventListener('click', () => miru.openPacksFolder());
+  $('packsReload').addEventListener('click', () => miru.reloadPacks());
+  miru.onPacks((data) => {
+    Sprites.syncUserPacks((data && data.packs) || []);
+    applyPack();
+    renderLookSeg();
+    renderPackErrors(data && data.errors);
+    drawCatOn(prevCanvas, currentSkin(), FRAMES.sit, 7, false);
+    drawEditor();
+    renderPresets();
+  });
 
   document.querySelectorAll('#styleSeg button').forEach((b) => {
     b.classList.toggle('active', b.dataset.v === (settings.skinStyle || 'plain'));
@@ -240,7 +261,7 @@
 
   // ------------------------------------------------------------ pixel editor
   // editor cell size — wide user packs shrink cells instead of overflowing
-  const PIX = Math.max(6, Math.min(13, Math.floor(400 / FRAMES.sit.w)));
+  let PIX = 13;
   const editCanvas = $('pixedit');
   const editCtx = editCanvas.getContext('2d');
   let brush = '#867e74';
@@ -249,7 +270,8 @@
   function overrides() { return ovSlice(); }
 
   function drawEditor() {
-    // canvas tracks the current frame's grid (kawaii is 30-wide, classic 24)
+    // canvas tracks the active pack's sit grid, cells shrink for wide packs
+    PIX = Math.max(6, Math.min(13, Math.floor(400 / FRAMES.sit.w)));
     const ew = FRAMES.sit.w * PIX, eh = FRAMES.sit.h * PIX;
     if (editCanvas.width !== ew) editCanvas.width = ew;
     if (editCanvas.height !== eh) editCanvas.height = eh;

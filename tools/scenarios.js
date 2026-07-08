@@ -45,7 +45,7 @@ async function waitFor(fn, what, timeoutMs = 4000, interval = 60) {
 }
 
 async function runScenarios(ctx) {
-  const { dir, catWin, send, store, pomControl, broadcastSettings, setTick, debug, mouse, port, askCalls } = ctx;
+  const { dir, catWin, send, store, pomControl, broadcastSettings, setTick, debug, mouse, port, askCalls, userDataDir, reloadPacks } = ctx;
   const post = (p, body) => httpPost(port(), p, body);
   const getStatus = async () => JSON.parse((await httpGet(port(), '/status')).body);
   fs.mkdirSync(dir, { recursive: true });
@@ -1438,6 +1438,79 @@ async function runScenarios(ctx) {
     store.set({ spritePack: 'sticker' });
     broadcastSettings();
     await waitFor(async () => Math.abs((await debug()).catBBox.h - stickerH) < 2, 'back to sticker');
+  });
+
+  await scenario('sprite packs: a user pack loads, degrades politely, restores', async () => {
+    const fixture = fs.readFileSync(path.join(__dirname, '..', 'docs', 'examples', 'roundcat', 'pack.json'), 'utf8');
+    const packDir = path.join(userDataDir, 'sprite-packs', 'testpack');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'pack.json'), fixture);
+    reloadPacks();
+    store.set({ spritePack: 'testpack' });
+    broadcastSettings();
+    // doctrine: wait on drawn geometry, not state — the bbox lands a frame
+    // after the pack switch
+    await waitFor(async () => {
+      const x = await debug();
+      return x.pack === 'testpack' && Math.abs(x.catBBox.h - 12 * 4) < 3 ? x : null;
+    }, 'roundcat drawn at her own size');
+    await poke('groom');
+    await wait(500);
+    const g = await debug();
+    assert(g.pack === 'testpack' && !/^sit_groom/.test(g.frame || ''), 'no groom frames -> ritual stays off: ' + g.frame);
+    await wait(150);
+    await cap('user-pack');
+    store.set({ spritePack: 'sticker' });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).pack === 'sticker', 'back to sticker');
+    await waitFor(async () => !(await debug()).grooming, 'groom poke expired');
+  });
+
+  await scenario('sprite packs: an invalid pack is skipped and says why', async () => {
+    const bad = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'docs', 'examples', 'roundcat', 'pack.json'), 'utf8'));
+    bad.frames.sit.rows[3] = 'too-short';
+    const badDir = path.join(userDataDir, 'sprite-packs', 'badpack');
+    fs.mkdirSync(badDir, { recursive: true });
+    fs.writeFileSync(path.join(badDir, 'pack.json'), JSON.stringify(bad));
+    reloadPacks();
+    const s = await getStatus();
+    assert(s.packs.includes('testpack'), 'good pack listed: ' + JSON.stringify(s.packs));
+    assert(!s.packs.includes('badpack'), 'bad pack absent from the list');
+    assert(s.packErrors.some((e) => e.id === 'badpack' && /row 3/.test(e.error)), 'error surfaced: ' + JSON.stringify(s.packErrors));
+    store.set({ spritePack: 'badpack' }); // selecting a broken id must not break her
+    broadcastSettings();
+    await wait(400);
+    assert((await debug()).pack === 'sticker', 'dangling id falls back to the default look');
+    store.set({ spritePack: 'sticker' });
+    broadcastSettings();
+  });
+
+  await scenario('store: v4 settings migrate to packs, paint intact', async () => {
+    const os = require('os');
+    const { Store } = require('../lib/store');
+    const mk = (obj) => { const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'miru-mig-')); fs.writeFileSync(path.join(d2, 'settings.json'), JSON.stringify(obj)); return d2; };
+    const s = new Store(mk({ version: 4, spriteStyle: 'kawaii', skin: 'orange', pixelOverrides: { '10,9': '#ffffff' }, scale: 3 })).get();
+    assert(s.version === 5 && s.spritePack === 'sticker', 'kawaii user lands on sticker v5');
+    assert(s.pixelOverrides.classic['10,9'] === '#ffffff' && s.pixelOverrides.sticker['10,9'] === '#ffffff', 'flat paint kept under both grids');
+    assert(s.skin === 'orange' && s.scale === 3, 'unrelated settings survive');
+    const s2 = new Store(mk({ version: 1, spriteStyle: 'classic' })).get();
+    assert(s2.spritePack === 'classic', 'classic stays classic');
+  });
+
+  await scenario('pixel paint: each pack keeps its own markings', async () => {
+    store.set({ pixelOverrides: { sticker: { '12,4': '#00ff00', '13,4': '#00ff00' } } });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).overridesCount === 2, 'sticker slice counted');
+    store.set({ spritePack: 'classic' });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).pack === 'classic', 'classic active');
+    assert((await debug()).overridesCount === 0, 'classic slice is empty');
+    store.set({ spritePack: 'sticker' });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).overridesCount === 2, 'sticker paint intact after the round trip');
+    store.set({ pixelOverrides: null });
+    broadcastSettings();
+    await waitFor(async () => (await debug()).overridesCount === 0, 'cleared');
   });
 
   await scenario('skin swap: calico renders', async () => {
