@@ -35,7 +35,8 @@ always behind a confirmation chip, always undoable.
 
 Every pixel is drawn by code. There are no image files, no fonts, no sounds;
 her entire anatomy is ASCII art in [`renderer/sprites.js`](renderer/sprites.js),
-and even the purr is synthesized. She began as a study of
+and even the purr is synthesized. Her look is a **sprite pack** — three ship
+built in, and drawing your own takes one JSON file. She began as a study of
 [comnyang](https://comnyang.com/), the original desktop cat, rebuilt from
 scratch.
 
@@ -89,21 +90,24 @@ per process, so the restart matters.
   pounce.
 - **Pet her** with slow strokes: purring, hearts, blush.
 - **Boop her nose** and she squashes, slow-blinks, and occasionally mlems.
-- **She kneads while you type.** Type like a maniac and she overheats and
-  steams; her fur never turns red, a test enforces it.
+- **She types along while you type** — on a tiny two-key keyboard of her
+  own. Type like a maniac and she overheats and steams; her fur never turns
+  red, a test enforces it.
 - **Scroll and she unrolls a paper** under her paws.
-- **Left alone, she has rituals**: washing up, ear flicks, tail wrapped around
-  her paws, a curious head-tilt when you hover, the rare blep.
+- **Left alone, she has rituals**: licking a raised paw, ear flicks, tail
+  wrapped around her paws, a curious head-tilt when you hover, the rare blep.
 - **She naps** in a loaf, dreams of fish (ears twitching), and wakes with a
   yawn and a startled `!`.
-- **Drag her** and she dangles, then wobbles like mochi when you let go.
+- **Drag her** and she dangles from the scruff, her body a real pendulum on
+  the moving pivot — jerk the window and she genuinely trails behind, then
+  sways to rest when you let go.
 
 <br clear="both" />
 
 ### She remembers you
 
 <img src="docs/morning.png" align="right" width="300"
-     alt="The cat with a morning greeting bubble and a small pixel gift set at her feet" />
+     alt="The cat play-bowing over a golden fish with sparkles, announcing 'I caught this for you! A golden fish (rare!)' in a paper speech bubble" />
 
 - **Bond levels change how she behaves**, not what she can do — more hearts
   when petted, zoomies for old friends. No visible numbers, ever.
@@ -142,6 +146,37 @@ per process, so the restart matters.
 
 <br clear="both" />
 
+### Her look is a pack
+
+<img src="docs/roundcat-sheet.png" align="right" width="240"
+     alt="A tiny hand-drawn 'roundcat' rendered in all seven fur colors, wearing a red scarf — except the black cat, whose scarf is yellow" />
+
+Three looks ship built in — **sticker** (the default, chart-accurate die-cut
+art), **classic**, and **kawaii** — and switching is one click in Settings →
+CAT → LOOK. Drawing your own is one JSON file:
+
+- A pack is **pure data**: ASCII frames plus optional colors and animation
+  hints. No code, so packs are safe to share — the worst a broken one can do
+  is be skipped with a readable error.
+- **Only `sit` is required.** Every pose degrades to the nearest thing you
+  did draw, so a three-frame starter cat already lives on the desktop; add
+  running, dangling, grooming as you go.
+- Packs can define **their own region characters with their own colors** —
+  the example pack's scarf is red on every coat and yellow on the black one —
+  while the user's chosen fur colors, patterns, and photo palettes keep
+  working on every pack.
+- Packs answer moments their own way: the sticker cat **play-bows over her
+  overnight gift**; yours can strike its own pose.
+- The **pixel editor paints per pack**, so face markings never smear across
+  different anatomies.
+
+Drop a folder into her `sprite-packs/` directory and press reload — the
+[authoring guide](docs/SPRITES.md) walks through the whole format, and
+[`docs/examples/roundcat`](docs/examples/roundcat/pack.json) (pictured) is a
+complete starter pack to copy.
+
+<br clear="both" />
+
 <details>
 <summary>The complete list</summary>
 
@@ -149,7 +184,7 @@ per process, so the restart matters.
 | --- | --- |
 | Eye follow | pupils track the cursor across the screen |
 | Hunt | fast cursor → chase → crouch + wiggle → pounce |
-| Drag | she hangs from the cursor, mochi-wobbles on release |
+| Drag | she dangles from the scruff, swinging like a pendulum |
 | Petting | strokes over her head → purr + hearts + blush |
 | Boop | click her nose → squash, slow-blink, sometimes a mlem |
 | Kneading¹ | typing → she kneads; sustained speed → overheat + steam |
@@ -166,7 +201,7 @@ per process, so the restart matters.
 | Away digest | one catch-up bubble after 2+ hours away |
 | Pomodoro | menu-bar timer, she stretches with you on breaks |
 | Reminders | meow at a time, pinned note above her head |
-| Agents | status LED, celebrations, question relay, typed answers |
+| Agents | status LED, celebrations, question relay, two-way asks with typed replies |
 | Customization | name, fur styles, photo-matched skin, pixel marking editor |
 | Sprite packs | three built-in looks + your own as pure JSON ([authoring guide](docs/SPRITES.md)) |
 | Hide/show | she leaves a note telling you how to call her back |
@@ -178,7 +213,7 @@ per process, so the restart matters.
 ## She watches your AI agents
 
 <img src="docs/agents.png" align="right" width="300"
-     alt="An agent question relayed onto the cat as a panel with two clickable answer options" />
+     alt="An agent's question on the cat: a dark panel reading 'COS asks — What should I tell the landlord about Saturday?' with a clickable option, a free-text reply field, and a Send button" />
 
 If you run Claude Code or Codex, she becomes the calmest status surface
 you've ever had: a cat with a tiny LED.
@@ -188,22 +223,31 @@ you've ever had: a cat with a tiny LED.
 - **One hop per finished turn.** Quick turns get a quiet nod; bursty
   pipelines are rate-limited; background and headless runs file into her
   inbox instead of interrupting you.
-- **Questions arrive as chips on her.** Click an answer and she focuses the
-  exact iTerm2/Terminal tab and types it for you.
+- **Questions arrive as a panel on her**, in the same quiet design as her
+  menu. Click an answer and she focuses the exact iTerm2/Terminal tab and
+  types it in for you.
 - **Speak to a session**: *"tell claude to run the tests."* She finds it,
-  asks you first, types the command into the prompt, and leaves the Enter
-  key to you.
+  asks you first, types the command into the prompt.
 
-Anything can drive her:
+And it goes both ways — **any tool can ask a question through her and get
+your answer back**. The HTTP response is held open until you click a chip,
+type into the optional reply field, or dismiss; no timeout unless the caller
+sets one, and silence is never treated as consent:
 
 ```bash
+# status is fire-and-forget
 curl -X POST http://127.0.0.1:41999/agent \
   -H "Content-Type: application/json" \
   -d '{"agent":"ci","state":"done"}'   # thinking | done | alert | idle
+
+# asks block until the human decides
+miru ask "Deploy to prod?" -o "Ship it" -o "Wait: staging first" --text
+# → prints the chosen label, or whatever you typed into the reply field
 ```
 
-Wiring up Claude Code or Codex is two button presses — see
-[Optional powers](#optional-powers).
+The same channel is `POST /ask` over HTTP and the `ask_user` tool over MCP —
+one held response, three doors. Wiring up Claude Code or Codex is two button
+presses — see [Optional powers](#optional-powers).
 
 <br clear="both" />
 
@@ -230,10 +274,10 @@ non-negotiable:
 
 | Surface | Looks like |
 | --- | --- |
-| `miru` CLI | `miru todo "review the PR @ 3pm"` |
+| `miru` CLI | `miru todo "review the PR @ 3pm"` · `miru ask "Merge?" -o Yes -o No` |
 | HTTP | `curl -X POST 127.0.0.1:41999/say -d '{"text":"DEPLOY DONE"}'` |
 | Deep links | `open "miru://say?text=hi"` — Shortcuts, Raycast, browsers |
-| MCP | `cat_say` · `cat_todo` · `cat_list_tasks` · `cat_status` · `cat_voice` |
+| MCP | `cat_say` · `cat_todo` · `cat_list_tasks` · `cat_status` · `cat_voice` · `ask_user` |
 
 All four proxy the same local API, which only ever binds to 127.0.0.1.
 
@@ -244,6 +288,8 @@ All four proxy the same local API, which only ever binds to 127.0.0.1.
 
 `POST /say {text}` · `/todo {text}` · `/voice {text}` · `/menu` · `/show` ·
 `/hide` · `/url {url}` · `/agent {agent, state, interactive?}` ·
+`/ask {agent?, question, options?, allowText?, timeoutMs?}` — the response is
+held open until the human answers ·
 `/hook/claude/<prompt|stop|notification|ask|ask-done|end>` ·
 `/hook/codex/notify`
 
@@ -277,7 +323,8 @@ first.
    `claude mcp add miru -s user -- node "$(pwd)/tools/mcp-server.js"`
 2. `claude mcp list` should show `miru`.
 3. Agents now have `cat_say`, `cat_todo`, `cat_list_tasks`, `cat_status`,
-   and `cat_voice`. Remove with `claude mcp remove miru`.
+   `cat_voice`, and `ask_user` — the last one blocks until you click or type
+   an answer on the cat. Remove with `claude mcp remove miru`.
 
 </details>
 
@@ -340,7 +387,7 @@ main.js            the entire main process: window, tray, a single 60 Hz loop,
 preload.js         the narrow IPC bridge
 renderer/
   cat.js           her state machine: moods, gestures, menu, panels, on canvas
-  sprites.js       her entire anatomy — every frame is ASCII art
+  sprites.js       her anatomy as sprite packs — every frame is ASCII art
   font.js          the pixel font, also drawn in code
   audio.js         synthesized chiptune purrs and meows, no audio files
   voice.js         microphone capture to WAV, in the renderer
@@ -353,12 +400,13 @@ lib/
   claudeHooks.js   installs/uninstalls the six Claude Code hooks, with backup
   codexHooks.js    wires Codex's notify hook, with backup
   focusTty.js      finds the terminal tab a session lives in and types for you
+  validatePack.js  the gate every user sprite pack passes before rendering
   store.js         settings and state, one JSON file
 tools/
-  scenarios.js     the 66-scenario behavior suite
-  miru.js        the CLI
+  scenarios.js     the 89-scenario behavior suite
+  miru.js          the CLI
   mcp-server.js    MCP over stdio: hand-rolled JSON-RPC, zero dependencies
-  preview.js       sprite contact sheets without opening the app
+  preview.js       contact sheets for any pack, without opening the app
 site/              the landing page; the same sprite engine renders a living cat
 ```
 
@@ -388,11 +436,11 @@ judged by looking at her, not just at the assertions.
 ```text
 ✓ overheat: fast typing steams the cat, fur never turns red
 ✓ hunt: run, leap, caught
-✓ question: panel shows real options, click types answer
+✓ external ask: a typed reply travels back
 ✓ streaks: weekends never break them, weekdays do
 ✓ voice: spoken todo → chips → auto-add → tap-to-undo
-✓ rituals: grooming — paw lick, ear wipe, happy eyes
-  … 66 in all
+✓ sprite packs: a user pack loads, degrades politely, restores
+  … 89 in all
 ```
 
 One favorite detail: the overheat scenario scans the live canvas pixel by
@@ -400,15 +448,16 @@ pixel and fails if a single pixel lands in the old red-tint zone. Her fur
 stays hers.
 
 <img src="docs/contact-sheet.png" width="760"
-     alt="A contact sheet of her sprite frames across several fur colors: sitting, tail positions, kneading, loafing, hanging, celebrating, stretching" />
+     alt="A contact sheet of the sticker pack's frames across three fur colors: sitting, tail positions, kneading, loafing, dangling, celebrating, stretching, grooming, running" />
 
 ## Developing her
 
 | Command | What it does |
 | --- | --- |
 | `npm start` | run her |
-| `npm test` | the 66-scenario suite, screenshots to `/tmp/miru-test/` |
-| `npm run preview` | contact sheet of every sprite frame × skin, no app needed |
+| `npm test` | the 89-scenario suite, screenshots to `/tmp/miru-test/` |
+| `npm run preview` | contact sheet of the default pack × every skin, no app needed |
+| `node tools/preview.js /tmp/s.png plain <pack>` | sheet for any pack, or a bare `pack.json` |
 | `npm run smoke` | boot + self-check |
 | `npx electron . --shot /tmp/shots` | capture seven labeled real states |
 
@@ -420,8 +469,10 @@ engine renders a living, boopable cat. `renderer/sprites.js` is vendored into
 Before a PR: `npm test` should pass, and anything visual should come with
 its screenshots (`npm run preview`, or the shots the suite already takes).
 House style: no image or audio assets — she is drawn and voiced in code;
-pixel art belongs to the cat, panels stay quiet and modern. For anything
-large, open an issue first so we can talk it over.
+pixel art belongs to the cat, panels stay quiet and modern. New looks
+belong in sprite packs, not in engine forks — start from the
+[authoring guide](docs/SPRITES.md). For anything large, open an issue first
+so we can talk it over.
 
 ## License and lineage
 
